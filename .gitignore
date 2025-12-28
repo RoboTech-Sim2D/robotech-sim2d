@@ -1,0 +1,70 @@
+# RoboTech images
+*.png
+!assets/
+!assets/*.png
+
+# RoboCup 2D Simulation Logs
+*.rcg
+*.rcl
+
+# Backup Build Directory
+/build_backup/
+/.github
+
+
+# Object files and Shared Libraries
+*.o
+*.obj
+*.a
+*.la
+*.lo
+*.so
+*.dll
+*.dylib
+
+# Autotools & Make generated files
+Makefile
+Makefile.in
+.deps/
+.libs/
+aclocal.m4
+autom4te.cache/
+config.guess
+config.sub
+config.h
+config.h.in
+config.log
+config.status
+configure
+depcomp
+install-sh
+missing
+libtool
+ltmain.sh
+stamp-h1
+compile
+testlogs.txt
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+/build/
+
+# Compiled Executables
+# Assuming standard Helios build output names
+src/player/sample_player
+src/coach/sample_coach
+src/trainer/sample_trainer
+# Generic Ignore for binaries without extension (be careful with this if you have scripts without extension)
+# it is cleaner to specify the known executables above.
+
+# Editor and System files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+# Backup files
+*.bak
