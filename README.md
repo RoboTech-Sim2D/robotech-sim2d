@@ -3,7 +3,7 @@
 [![GitHub license](https://img.shields.io/github/license/helios-base/helios-base)](https://github.com/helios-base/helios-base/blob/master/LICENSE)
 
 <div align="center">
-  <img src="assets/RoboTechLogo.png" alt="Descripción de la imagen" width="200"/>
+  <img src="assets/RoboTechlogo.png" alt="Descripción de la imagen" width="200"/>
 </div>
 
 
