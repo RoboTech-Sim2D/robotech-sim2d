@@ -75,15 +75,16 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     //-----------------------------------------------
     // tackle
     // G2d: tackle probability
-    double doTackleProb = 0.8;
-    if (wm.ball().pos().x < 0.0)
-    {
-      doTackleProb = 0.5;
-    }
+    double doTackleProb = 0.2; // Tackle on sight (was 0.8)
+    // if (wm.ball().pos().x < 0.0)
+    // {
+    //   doTackleProb = 0.5;
+    // }
 
     if ( Bhv_BasicTackle( doTackleProb, 80.0 ).execute( agent ) )
     {
         return true;
+        std::cerr << "Presionando" << std::endl;
     }
 
     /*--------------------------------------------------------*/
@@ -113,7 +114,7 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
 
     Vector2D ball = wm.ball().pos();
 
-    double block_d = -10.0;
+    double block_d = 10.0; // DEFENSE MOD: Start blocking earlier (was -10.0)
 
     Vector2D me = wm.self().pos();
     Vector2D homePos = target_point;
@@ -143,19 +144,17 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
         {
             // do nothing
         }
-        else if( (num == 2 || num == 3) && fabs(wm.ball().pos().y) > 22.0 )
-        {
-            // do nothing
-        }
-        else if (Bhv_BasicBlock().execute(agent)){
+        // DEFENSE MOD: Removed "passive wide defense" for CBs (num 2, 3)
+        // previously they ignored balls with |y| > 22.0
+         else if (Bhv_BasicBlock().execute(agent)){
             return true;
         }
 
     } // end of block
 
 
-    // G2d: pressing
-    int pressing = 13;
+    // G2d: pressin
+    int pressing = 25; //aggressive pressing (was 13)
 
     if ( role >= 6 && role <= 8 && wm.ball().pos().x > -30.0 && wm.self().pos().x < 10.0 )
         pressing = 7;
@@ -241,7 +240,8 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     agent->debugClient().setTarget( target_point );
     agent->debugClient().addCircle( target_point, dist_thr );
 
-    if ( ! Body_GoToPoint( target_point, dist_thr, dash_power
+    if ( ! Body_GoToPoint( target_point, dist_thr, dash_power,
+                           -1.0, 100, false
                            ).execute( agent ) )
     {
         Body_TurnToBall().execute( agent );

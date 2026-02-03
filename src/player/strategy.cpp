@@ -1605,6 +1605,18 @@ Strategy::get_normal_dash_power( const WorldModel & wm )
     const int mate_min = wm.interceptTable().teammateStep();
     const int opp_min = wm.interceptTable().opponentStep();
 
+    // AGGRESSIVE SPEED BOOST
+    // If I am the closest teammate (or have ball), ignore stamina conversation
+    if ( self_min <= mate_min )
+    {
+        double boost_power = ServerParam::i().maxDashPower();
+        std::cerr << "[DBG Strategy] BOOST ENABLED! Unum: " << wm.self().unum()
+                  << ", Dist: " << self_min
+                  << ", Stamina: " << wm.self().stamina()
+                  << std::endl;
+        return boost_power;
+    }
+
     // check recover
     if ( wm.self().staminaModel().capacityIsEmpty() )
     {

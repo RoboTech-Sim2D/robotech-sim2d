@@ -214,7 +214,7 @@ AngleDeg Bhv_BasicBlock::dribble_direction_detector(Vector2D dribble_pos)
             continue;
         if (target.absY() > ServerParam::i().pitchHalfWidth())
             continue;
-        double score = -target.x + std::max(0.0, 40 - target.dist(Vector2D(-50, 0)));
+        double score = -target.x + std::max(0.0, 40 - target.dist(Vector2D(-50, 0)) * 2.0);
         if (score > best_score)
         {
             best_score = score;
