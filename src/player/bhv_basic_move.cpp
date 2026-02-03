@@ -75,7 +75,7 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     //-----------------------------------------------
     // tackle
     // G2d: tackle probability
-    double doTackleProb = 0.2; // Tackle on sight (was 0.8)
+    double doTackleProb = 0.15; // Tackle on sight (was 0.8)
     // if (wm.ball().pos().x < 0.0)
     // {
     //   doTackleProb = 0.5;
@@ -84,7 +84,6 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     if ( Bhv_BasicTackle( doTackleProb, 100.0 ).execute( agent ) )
     {
         return true;
-        std::cerr << "Presionando" << std::endl;
     }
 
     /*--------------------------------------------------------*/
