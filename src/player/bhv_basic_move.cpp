@@ -81,7 +81,7 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     //   doTackleProb = 0.5;
     // }
 
-    if ( Bhv_BasicTackle( doTackleProb, 80.0 ).execute( agent ) )
+    if ( Bhv_BasicTackle( doTackleProb, 100.0 ).execute( agent ) )
     {
         return true;
         std::cerr << "Presionando" << std::endl;
