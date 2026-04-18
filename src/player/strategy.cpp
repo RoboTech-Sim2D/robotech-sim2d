@@ -567,7 +567,7 @@ Strategy::updateSituation( const WorldModel & wm )
                           __FILE__": Situation PenaltyKick" );
             M_current_situation = PenaltyKick_Situation;
         }
-        else if ( wm.gameMode().isPenaltyKickMode() )
+        else if ( wm.gameMode().isOurSetPlay( wm.ourSide() ) )
         {
             dlog.addText( Logger::TEAM,
                           __FILE__": Situation OurSetPlay" );
@@ -1615,7 +1615,7 @@ Strategy::get_normal_dash_power( const WorldModel & wm )
         // Conserve when stamina is critically low and not an emergency intercept
         // (stamina < 35% means effort is decaying; capacity drain is permanent)
         if ( ! wm.self().staminaModel().capacityIsEmpty()
-             && wm.self().stamina() < ServerParam::i().staminaMax() * 0.35
+             && wm.self().stamina() < ServerParam::i().staminaMax() * 0.25
              && self_min > 3 )
         {
             double conservative = wm.self().playerType().staminaIncMax()

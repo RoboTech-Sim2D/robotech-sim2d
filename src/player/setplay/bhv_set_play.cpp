@@ -605,6 +605,121 @@ void
 Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
 {
     const WorldModel & wm = agent->world();
+    const ServerParam & SP = ServerParam::i();
+
+    // ── RoboCIn 2024 §3: Set Play Marking (deterministic assignment) ──
+    // All eligible players compute the same sorted assignment independently,
+    // avoiding double-marking without shared state.
+    // Opponents sorted by threat (distance to our goal, ascending).
+    // Markers sorted by home-position y (matching lateral role to lateral threat).
+    // Defensive players (home x < -10) skip when ball is in our half.
+    {
+        const Vector2D ball_pos = wm.ball().pos();
+        const Vector2D home_pos = Strategy::i().getPosition( wm.self().unum() );
+        const Vector2D our_goal( -SP.pitchHalfLength(), 0.0 );
+
+        const bool is_defensive  = ( home_pos.isValid() && home_pos.x < -10.0 );
+        const bool ball_our_half = ( ball_pos.x < -15.0 );
+        const bool should_mark   = ! wm.self().goalie()
+                                   && ball_pos.x < 15.0
+                                   && ! ( is_defensive && ball_our_half );
+
+        if ( should_mark )
+        {
+            const double excl_radius = 9.5;
+
+            // 1. Collect markable threats sorted by danger (closest to our goal first)
+            std::vector<const PlayerObject *> threats;
+            for ( const PlayerObject * opp : wm.opponents() )
+            {
+                if ( ! opp ) continue;
+                if ( opp->posCount() > 5 ) continue;
+                if ( opp->pos().dist( ball_pos ) < excl_radius ) continue;
+                if ( opp->pos().x > 20.0 ) continue;
+                threats.push_back( opp );
+            }
+            std::sort( threats.begin(), threats.end(),
+                       [&our_goal]( const PlayerObject * a, const PlayerObject * b ) {
+                           return a->pos().dist( our_goal ) < b->pos().dist( our_goal );
+                       } );
+
+            // 2. Collect eligible marker unums sorted by home-y (lateral matching)
+            //    Uses same eligibility criteria as should_mark, applied per teammate.
+            std::vector<std::pair<double, int>> marker_hy_unum; // (home_y, unum)
+            for ( const PlayerObject * tm : wm.teammates() )
+            {
+                if ( ! tm || tm->goalie() ) continue;
+                const Vector2D tm_home = Strategy::i().getPosition( tm->unum() );
+                const bool tm_def = ( tm_home.isValid() && tm_home.x < -10.0 );
+                if ( tm_def && ball_our_half ) continue;
+                double hy = tm_home.isValid() ? tm_home.y : tm->pos().y;
+                marker_hy_unum.emplace_back( hy, tm->unum() );
+            }
+            // Add self
+            {
+                double my_hy = home_pos.isValid() ? home_pos.y : wm.self().pos().y;
+                marker_hy_unum.emplace_back( my_hy, wm.self().unum() );
+            }
+            std::sort( marker_hy_unum.begin(), marker_hy_unum.end() );
+
+            // 3. Find my rank in the sorted marker list
+            int my_rank = -1;
+            for ( int k = 0; k < (int)marker_hy_unum.size(); ++k )
+            {
+                if ( marker_hy_unum[k].second == wm.self().unum() )
+                { my_rank = k; break; }
+            }
+
+            // 4. My assigned threat is threats[my_rank] (if it exists)
+            const PlayerObject * mark_target = nullptr;
+            if ( my_rank >= 0 && my_rank < (int)threats.size() )
+            {
+                const PlayerObject * cand = threats[my_rank];
+                // Home-deviation constraint: mark pos must be within 8m of home
+                if ( home_pos.isValid() )
+                {
+                    Vector2D opp_to_goal = our_goal - cand->pos();
+                    double len = opp_to_goal.r();
+                    Vector2D mark_pt = ( len > 0.1 )
+                        ? cand->pos() + opp_to_goal * ( 0.9 / len )
+                        : cand->pos();
+                    if ( home_pos.dist( mark_pt ) <= 8.0 )
+                        mark_target = cand;
+                }
+                else
+                {
+                    mark_target = cand;
+                }
+            }
+
+            if ( mark_target )
+            {
+                Vector2D opp_to_goal = our_goal - mark_target->pos();
+                double len = opp_to_goal.r();
+                Vector2D mark_pos = ( len > 0.1 )
+                    ? mark_target->pos() + opp_to_goal * ( 0.9 / len )
+                    : mark_target->pos();
+                mark_pos.x = std::max( -SP.pitchHalfLength() + 1.0,
+                             std::min(  SP.pitchHalfLength() - 1.0, mark_pos.x ) );
+                mark_pos.y = std::max( -SP.pitchHalfWidth()  + 1.0,
+                             std::min(  SP.pitchHalfWidth()  - 1.0, mark_pos.y ) );
+
+                agent->debugClient().addMessage( "SetPlayMark%d", mark_target->unum() );
+                dlog.addText( Logger::TEAM,
+                              __FILE__": SetPlayMark rank=%d opp=%d (%.1f,%.1f)->(%.1f,%.1f)",
+                              my_rank, mark_target->unum(),
+                              mark_target->pos().x, mark_target->pos().y,
+                              mark_pos.x, mark_pos.y );
+
+                double dash_power = Bhv_SetPlay::get_set_play_dash_power( agent );
+                if ( ! Body_GoToPoint( mark_pos, 0.6, dash_power ).execute( agent ) )
+                    Body_TurnToAngle( ( mark_target->pos() - wm.self().pos() ).th() ).execute( agent );
+                agent->setNeckAction( new Neck_TurnToBall() );
+                return;
+            }
+        }
+    }
+    // ── End Set Play Marking ──
 
     Vector2D target_point = Strategy::i().getPosition( wm.self().unum() );
 

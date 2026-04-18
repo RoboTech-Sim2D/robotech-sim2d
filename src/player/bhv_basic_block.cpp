@@ -121,6 +121,8 @@ std::vector<int> Bhv_BasicBlock::get_blockers(const PlayerAgent *agent)
     {
         if (tm->isGhost())
             continue;
+        if (tm->unum() < 1 || tm->unum() > 11)
+            continue;
         if (tm->goalie())
             continue;
         if (tm->isTackling())

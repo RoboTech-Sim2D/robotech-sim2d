@@ -678,7 +678,7 @@ StrictCheckPassGenerator::createLeadingPass( const WorldModel & wm,
 
     static const int ANGLE_DIVS = 24;
     static const double ANGLE_STEP = 360.0 / ANGLE_DIVS;
-    static const double DIST_DIVS = 4;
+    static const double DIST_DIVS = 7;  // expanded from 4 (Cyrus-style: 7 × 1.1m = 7.7m)
     static const double DIST_STEP = 1.1;
 
     const ServerParam & SP = ServerParam::i();
@@ -893,8 +893,8 @@ StrictCheckPassGenerator::createThroughPass( const WorldModel & wm,
         * std::pow( ServerParam::i().ballDecay(), MIN_RECEIVE_STEP );
 
     static const int ANGLE_DIVS = 14;
-    static const double MIN_ANGLE = -40.0;
-    static const double MAX_ANGLE = +40.0;
+    static const double MIN_ANGLE = -70.0;  // expanded from ±40° to ±70° (Cyrus-style)
+    static const double MAX_ANGLE = +70.0;
     static const double ANGLE_STEP = ( MAX_ANGLE - MIN_ANGLE ) / ANGLE_DIVS;
 
     static const double MIN_MOVE_DIST = 6.0;
@@ -905,12 +905,12 @@ StrictCheckPassGenerator::createThroughPass( const WorldModel & wm,
     const PlayerType * ptype = receiver.player_->playerTypePtr();
     const AngleDeg receiver_vel_angle = receiver.vel_.th();
 
-    const double min_receive_x = std::min( std::min( std::max( 10.0, M_first_point.x + 10.0 ),
+    const double min_receive_x = std::min( std::min( std::max( 5.0, M_first_point.x + 8.0 ),
                                                      wm.offsideLineX() - 10.0 ),
                                            SP.theirPenaltyAreaLineX() - 5.0 );
 
     if ( receiver.pos_.x < min_receive_x - MAX_MOVE_DIST
-         || receiver.pos_.x < 1.0 )
+         || receiver.pos_.x < -5.0 )  // relaxed: allow receivers near midfield
     {
 #ifdef DEBUG_THROUGH_PASS
         dlog.addText( Logger::PASS,

@@ -61,7 +61,7 @@ Bhv_GoalieChaseBall::execute( PlayerAgent * agent )
 
     //////////////////////////////////////////////////////////////////
     // tackle
-    if ( Bhv_BasicTackle( 0.8, 90.0 ).execute( agent ) )
+    if ( Bhv_BasicTackle( 0.5, 90.0 ).execute( agent ) )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": tackle" );
@@ -84,14 +84,13 @@ Bhv_GoalieChaseBall::execute( PlayerAgent * agent )
 
     //----------------------------------------------------------
     const Line2D ball_line( wm.ball().pos(), wm.ball().vel().th() );
-    const Line2D defend_line( Vector2D( wm.self().pos().x, -10.0 ),
-                              Vector2D( wm.self().pos().x, 10.0 ) );
+    const Line2D defend_line( Vector2D( -52.0, -10.0 ),
+                              Vector2D( -52.0,  10.0 ) );
 
     if ( my_int_pos.x > - SP.pitchHalfLength() - 1.0
          && my_int_pos.x < SP.ourPenaltyAreaLineX() - pen_thr
          && my_int_pos.absY() < SP.penaltyAreaHalfWidth() - pen_thr )
     {
-        // Portero siempre a máxima potencia al interceptar — nunca ahorrar energía
         dlog.addText( Logger::TEAM,
                       __FILE__": execute normal intercept" );
         agent->debugClient().addMessage( "Intercept(0)" );
@@ -104,6 +103,7 @@ Bhv_GoalieChaseBall::execute( PlayerAgent * agent )
     int opp_min_cyc = wm.interceptTable().opponentStep();
 
     Vector2D intersection = ball_line.intersection( defend_line );
+
     if ( ! intersection.isValid()
          || ball_line.dist( wm.self().pos() ) < SP.catchableArea() * 0.8
          || intersection.absY() > SP.goalHalfWidth() + 3.0
@@ -128,13 +128,11 @@ Bhv_GoalieChaseBall::execute( PlayerAgent * agent )
             }
 
             dlog.addText( Logger::TEAM,
-                          __FILE__": execute. ball vel has same slope to my body??"
-                          " myvel-ang=%f body=%f. go to ball direct",
+                          __FILE__": execute. go to ball direct",
                           wm.ball().vel().th().degree(),
                           wm.self().body().degree() );
-            // ball vel angle is same to my body angle
             agent->debugClient().addMessage( "GoToCatch(1)" );
-            doGoToCatchPoint( agent, wm.ball().pos() );
+            doGoToCatchPoint( agent, wm.ball().inertiaPoint( 1 ) );
             return true;
         }
     }
@@ -160,7 +158,10 @@ Bhv_GoalieChaseBall::execute( PlayerAgent * agent )
         }
         else
         {
-            return Bhv_GoalieBasicMove().execute( agent );
+            dlog.addText( Logger::TEAM, __FILE__": execute. intercept failed, go to ball direct" );
+            agent->debugClient().addMessage( "GoToCatch(F)" );
+            doGoToCatchPoint( agent, wm.ball().pos() );
+            return true;
         }
     }
 
@@ -298,19 +299,12 @@ Bhv_GoalieChaseBall::doGoToCatchPoint( PlayerAgent * agent,
 bool
 Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
 {
-    //Debug global para saber si va por el balon
     const WorldModel & wm = agent->world();
-    // ——— DEBUG: distancia y pasos de interceptación ———
-    {
-        double dist = wm.ball().distFromSelf();
-        int self_min = wm.interceptTable().selfStep();
-        int opp_min = wm.interceptTable().opponentStep();
-        dlog.addText( Logger::TEAM,
-            "DBG GoalChase: dist=%.2f self=%d opp=%d",
-            dist, self_min, opp_min );
-        std::cerr << "  -> chaseBall" << std::endl;
-    }
-    
+
+    // Hysteresis: once committed to chasing, hold for 3 cycles
+    // Prevents per-cycle flip-flop when conditions are borderline
+    static int s_chase_until_cycle = -1;
+    const int current_cycle = wm.time().cycle();
 
     //if ( wm.gameMode().type() != GameMode::PlayOn )
     //{
@@ -341,19 +335,24 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
         {
             dlog.addText( Logger::TEAM,
                           __FILE__": danger area. ball is very near." );
+            s_chase_until_cycle = current_cycle + 3;
             return true;
         }
         else if ( self_min > opp_min + 3
-                  && opp_min < 7 )
+                  && opp_min < 7
+                  && wm.ball().vel().x > -0.3 )
         {
+            // Opponent faster AND ball is NOT moving toward goal — don't rush out
             dlog.addText( Logger::TEAM,
-                          __FILE__": danger area. opponent may get tha ball faster than me" );
+                          __FILE__": danger area. opponent faster and ball not toward goal" );
             return false;
         }
         else
         {
+            // Ball heading toward goal OR we can contest — always chase
             dlog.addText( Logger::TEAM,
                           __FILE__": danger area. chase ball" );
+            s_chase_until_cycle = current_cycle + 3;
             return true;
         }
     }
@@ -365,8 +364,8 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": shoot moving. chase ball" );
+        s_chase_until_cycle = current_cycle + 3;
         return true;
-         std::cerr << "Se mueve la pelota" << std::endl;
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -386,17 +385,19 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": sweeper-keeper: salgo a interceptar balon libre" );
-        std::cerr << "SWEEPER: balon libre hacia porteria, salgo" << std::endl;
+        s_chase_until_cycle = current_cycle + 3;
         return true;
     }
 
     double pen_thr = wm.ball().distFromSelf() * 0.1 + 1.0;
     if ( pen_thr < 1.0 ) pen_thr = 1.0;
-    if ( my_int_pos.absY() > SP.penaltyAreaHalfWidth() * 1.5 - pen_thr
+    // GK can only catch within penalty area width — intercept outside is unreachable
+    if ( my_int_pos.absY() > SP.penaltyAreaHalfWidth() - pen_thr
          || my_int_pos.x > SP.ourPenaltyAreaLineX() - pen_thr )
     {
         dlog.addText( Logger::TEAM,
-                      __FILE__": intercept point is out of penalty" );
+                      __FILE__": intercept point is out of penalty (y=%.1f thr=%.1f)",
+                      my_int_pos.absY(), SP.penaltyAreaHalfWidth() - pen_thr );
         return false;
     }
 
@@ -409,7 +410,6 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
         dlog.addText( Logger::TEAM,
                       __FILE__": ball is moving away from goal. vel.x=%.2f don't chase",
                       wm.ball().vel().x );
-        std::cerr << "Balón alejándose (vel.x=" << wm.ball().vel().x << "), no persigo" << std::endl;
         return false;
     }
 
@@ -422,14 +422,23 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": exist kickable player" );
+        s_chase_until_cycle = -1;  // break commitment on teammate possession
         return false;
+    }
+
+    // Maintain committed chase for N cycles — prevents oscillation on borderline conditions
+    if ( current_cycle <= s_chase_until_cycle )
+    {
+        dlog.addText( Logger::TEAM,
+                      __FILE__": hysteresis: maintaining chase commitment until cycle %d",
+                      s_chase_until_cycle );
+        return true;
     }
 
     if ( opp_min <= self_min - 2 )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": opponent reach the ball faster than me" );
-        std::cerr << "Me gana el duelo el contrario" << std::endl;
         return false;
     }
 
@@ -443,13 +452,12 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
         dlog.addText( Logger::TEAM,
                       __FILE__": opponent is nearer than me. my_dist=%.2f  opp_dist=%.2f",
                       my_dist_to_catch, opp_min_dist );
-        std::cerr << "Me gana el duelo el contrario" << std::endl;
         return false;
     }
 
     dlog.addText( Logger::TEAM,
                   __FILE__": exist interception point. try chase." );
-    std::cerr << "Voy a por el balon" << std::endl;
+    s_chase_until_cycle = current_cycle + 3;  // commit for 3 cycles
     return true;
 }
 
@@ -468,26 +476,23 @@ Bhv_GoalieChaseBall::is_ball_shoot_moving( const PlayerAgent * agent )
         return false;
     }
 
-#if 1
-    if ( wm.ball().pos().x > -24.0 )
+    // Only ignore shots from far beyond midfield (very long range, low threat)
+    if ( wm.ball().pos().x > -10.0 )
     {
         return false;
     }
-#endif
 
     // check opponent kicker
     if ( wm.kickableOpponent() )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": check shoot moving. opponent kickable " );
-        std::cerr << "Mirando tiro, oponente batible" << std::endl;
         return false;
     }
     else if ( wm.kickableTeammate() )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": check shoot moving. teammate kickable" );
-        std::cerr << "Mirando tiro, compañero batible" << std::endl;
         return false;
     }
 
@@ -499,12 +504,10 @@ Bhv_GoalieChaseBall::is_ball_shoot_moving( const PlayerAgent * agent )
             dlog.addText( Logger::TEAM,
                           __FILE__": check shoot moving. bvel.x(%f) is ZERO. but near to goal",
                           wm.ball().vel().x );
-            std::cerr << "Mirando tiro, pelota quieta cerca de la portería" << std::endl;
             return true;
         }
         dlog.addText( Logger::TEAM,
                       __FILE__": check shoot moving. bvel,x is small" );
-        std::cerr << "Mirando tiro, pelota quieta" << std::endl;
         return false;
     }
 
@@ -515,13 +518,13 @@ Bhv_GoalieChaseBall::is_ball_shoot_moving( const PlayerAgent * agent )
     if ( std::fabs( ball_line.b() ) > 0.1
          && std::fabs( intersection_y ) < SP.goalHalfWidth() + 2.0 )
     {
-        if ( wm.ball().pos().x < -40.0
-             && wm.ball().pos().absY() < 15.0 )
+        if ( wm.ball().pos().x < -25.0
+             && wm.ball().pos().absY() < 20.0 )
         {
             const Vector2D end_point
                 = wm.ball().pos()
                 + wm.ball().vel() / ( 1.0 - SP.ballDecay());
-            if ( wm.ball().vel().r() > 0.5 // 1.0
+            if ( wm.ball().vel().r() > 0.4
                  && end_point.x < -SP.pitchHalfLength() + 2.0 )
             {
                 dlog.addText( Logger::TEAM,

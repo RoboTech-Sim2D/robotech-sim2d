@@ -200,29 +200,63 @@ SampleFieldEvaluator::operator()(const PredictState &state,
     // DNN bonus: trained from match logs (adds [-2, +2] to score)
     result += dnn_evaluate( state, wm );
 
-    // Pass-over-dribble bonus: ball travels at decay 0.94 vs player decay 0.40,
-    // meaning passing is ~3x faster than dribbling. Chains with short passes
-    // advance play more efficiently and give opponents less time to reorganize.
+    // ── RoboCIn Localization: zone-aware action bonuses ──────────────────────
+    // Field divided into 3 zones by x:
+    //   Defensive  (Z1): x < -20  → escaping pressure is top priority
+    //   Midfield   (Z2): -20..15  → spacing and forward progression valued
+    //   Offensive  (Z3): x > 15   → goal proximity and shot creation valued
+    //
+    // Rules derived from RoboCIn 2023/2024 TDP §3 (zone classifier):
+    //   - Backward passes get no bonus (ever) — they waste sequences
+    //   - Forward passes get zone-scaled bonus: bigger in midfield/offensive
+    //   - Dribble forward in sparse zone (Z2/Z3) is rewarded
+    //   - Dribble backward always penalized
     if ( ! path.empty() )
     {
-        for ( const auto & asp : path )
+        for ( size_t i = 0; i < path.size(); ++i )
         {
+            const auto & asp = path[i];
+
+            // Ball origin for this action
+            const Vector2D & origin = ( i == 0 )
+                ? wm.ball().pos()
+                : path[i-1].state().ball().pos();
+            const Vector2D & dest = asp.action().targetPoint();
+
+            double dx = dest.x - origin.x;
+            double dy = dest.y - origin.y;
+            double forward_gain = dx;  // positive = toward opp goal
+
+            // Zone of the origin
+            double zone_mult;
+            if ( origin.x < -20.0 )
+                zone_mult = 1.0;   // Z1: modest bonus — any forward progress helps
+            else if ( origin.x < 15.0 )
+                zone_mult = 2.0;   // Z2: midfield — forward progression is crucial
+            else
+                zone_mult = 3.0;   // Z3: offensive — maximize goal threat
+
             if ( asp.action().category() == CooperativeAction::Pass )
             {
-                double pass_dist = asp.action().targetPoint().dist( state.ball().pos() );
-                // Strongly favor passes: ball at 0.94 decay vs player 0.40
-                // Short passes are safer and faster
-                if ( pass_dist < 15.0 )
-                    result += 1.5;   // short passes: fast, accurate
-                else if ( pass_dist < 25.0 )
-                    result += 1.0;   // medium passes: good
-                else
-                    result += 0.5;   // long passes: still better than dribble
+                if ( forward_gain > 0.0 )
+                {
+                    // Forward pass: bonus scales with advancement × zone
+                    double angle = std::fabs( std::atan2( dy, dx ) * 180.0 / M_PI );
+                    double direction_mult = ( angle <= 30.0 ) ? 1.5   // through
+                                         : ( angle <= 70.0 ) ? 1.0   // diagonal
+                                         :                     0.4;  // wide cross
+
+                    result += zone_mult * direction_mult
+                              * std::min( forward_gain / 10.0, 2.0 );
+                }
+                // Backward/lateral passes: no bonus — discourage safe recycling
             }
             else if ( asp.action().category() == CooperativeAction::Dribble )
             {
-                // Penalize dribble chains: much slower than passing
-                result -= 0.3;
+                if ( forward_gain > 0.5 )
+                    result += zone_mult * 0.4;   // dribble forward: small reward
+                else
+                    result -= 0.5;               // dribble backward: penalize
             }
         }
     }
@@ -258,6 +292,18 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
                       "(eval) XXX null holder" );
 #endif
         return - DBL_MAX / 2.0;
+    }
+
+    // RoboCIn 2024 §2: Strongly penalize any action chain that ends with
+    // the opponent gaining possession. Fixed -500 regardless of ball position
+    // discourages risky passes and unsuccessful dribbles.
+    if ( holder->side() != state.ourSide() )
+    {
+#ifdef DEBUG_PRINT
+        dlog.addText( Logger::ACTION_CHAIN,
+                      "(eval) XXX opponent gains possession" );
+#endif
+        return -500.0;
     }
 
     const int holder_unum = holder->unum();
@@ -345,6 +391,15 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
 
     double point = state.ball().pos().x * weight;
 
+    // Non-linear bonus for proximity to opponent goal (Z3 — offensive zone).
+    // Linear x doesn't capture that x=40 is MUCH more dangerous than x=20.
+    // Extra bonus grows quadratically in the last 20m.
+    if ( state.ball().pos().x > 15.0 )
+    {
+        double approach = state.ball().pos().x - 15.0;  // 0..37.5
+        point += approach * approach * 0.08;             // up to +112 at goal line
+    }
+
         Vector2D best_point = ServerParam::i().theirTeamGoalPos();
 
     // G2d: new eval function
@@ -356,7 +411,7 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
 	else
 	{
 
-		if ( wm.ball().pos().x < 35.0 &&  state.ball().pos().x > 5.0 )
+		if ( wm.ball().pos().x < 35.0 &&  state.ball().pos().x > -15.0 )
 		{
                        VoronoiDiagram vd;
 
@@ -548,18 +603,28 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
                                         state.getPlayers( new OpponentOrUnknownPlayerPredicate( state.ourSide() ) ),
                                         VALID_PLAYER_THRESHOLD ) )
     {
-        point += 1.0e+6;
+        // Proportional shoot bonus: larger angle = better shooting position.
+        // Replaces flat 1e+6 — allows agent to distinguish tight angles from open ones.
+        // Scale 1000 * degrees: max ~90° → 90,000, well above all other bonuses (~200 max).
+        const Vector2D & hpos = holder->pos();
+        const AngleDeg ang1 = ( Vector2D( SP.pitchHalfLength(),  SP.goalHalfWidth() ) - hpos ).th();
+        const AngleDeg ang2 = ( Vector2D( SP.pitchHalfLength(), -SP.goalHalfWidth() ) - hpos ).th();
+        double shoot_angle_deg = ( ang1 - ang2 ).abs();
+        if ( shoot_angle_deg > 180.0 ) shoot_angle_deg = 360.0 - shoot_angle_deg;
+        point += 1000.0 * shoot_angle_deg;
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::ACTION_CHAIN,
-                      "(eval) bonus for goal %f (%f)", 1.0e+6, point );
+                      "(eval) bonus for goal angle=%.1f bonus=%.0f (%f)",
+                      shoot_angle_deg, 1000.0 * shoot_angle_deg, point );
 #endif
 
         if ( holder_unum == state.self().unum() )
         {
-            point += 5.0e+5;
+            point += 500.0 * shoot_angle_deg;  // self-bonus: proportional to angle
 #ifdef DEBUG_PRINT
             dlog.addText( Logger::ACTION_CHAIN,
-                          "(eval) bonus for goal self %f (%f)", 5.0e+5, point );
+                          "(eval) bonus for goal self %.0f (%f)",
+                          500.0 * shoot_angle_deg, point );
 #endif
         }
     }

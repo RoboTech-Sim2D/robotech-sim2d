@@ -823,9 +823,9 @@ SamplePlayer::createActionGenerator() const
     //
     // direct pass
     //
-    // g->addGenerator( new ActGen_RangeActionChainLengthFilter
-    //                  ( new ActGen_DirectPass(),
-    //                    2, ActGen_RangeActionChainLengthFilter::MAX ) );
+    g->addGenerator( new ActGen_RangeActionChainLengthFilter
+                     ( new ActGen_DirectPass(),
+                       2, ActGen_RangeActionChainLengthFilter::MAX ) );
 
     //
     // short dribble
@@ -842,9 +842,9 @@ SamplePlayer::createActionGenerator() const
     //
     // simple dribble
     //
-    // g->addGenerator( new ActGen_RangeActionChainLengthFilter
-    //                  ( new ActGen_SimpleDribble(),
-    //                    2, ActGen_RangeActionChainLengthFilter::MAX ) );
+    g->addGenerator( new ActGen_RangeActionChainLengthFilter
+                     ( new ActGen_SimpleDribble(),
+                       2, ActGen_RangeActionChainLengthFilter::MAX ) );
 
     return ActionGenerator::ConstPtr( g );
 }

@@ -39,9 +39,9 @@
 using namespace rcsc;
 
 static const double GOALIE_PASS_EVAL_THRESHOLD = 17.5;
-static const double BACK_PASS_EVAL_THRESHOLD = 13.0;    // Reducido de 17.5 a 13.0 para permitir más pases hacia atrás
-static const double PASS_EVAL_THRESHOLD = 14.5;
-static const double CHANCE_PASS_EVAL_THRESHOLD = 14.5;
+static const double BACK_PASS_EVAL_THRESHOLD = 10.0;   // permissive: back passes under pressure are safe
+static const double PASS_EVAL_THRESHOLD = 11.0;        // was 14.5 — too tight, blocked valid forward passes
+static const double CHANCE_PASS_EVAL_THRESHOLD = 11.0; // was 14.5
 static const double PASS_RECEIVER_PREDICT_STEP = 2.5;
 
 static const double PASS_REFERENCE_SPEED = 2.5;
@@ -53,7 +53,10 @@ static const double FAR_PASS_DIST_THR = 35.0;
 
 static const long VALID_TEAMMATE_ACCURACY = 8;
 static const long VALID_OPPONENT_ACCURACY = 20;
-static const double OPPONENT_DIST_THR2 = std::pow( 5.0, 2 );
+// Zone-based: in opponent box marking is tight — only block if opponent is ON receiver.
+// In midfield be slightly more permissive than before (was 5.0, then 3.0).
+// Value set dynamically below based on receive_point.x.
+static const double OPPONENT_DIST_THR2 = std::pow( 3.0, 2 );  // default (unused — see below)
 
 /*-------------------------------------------------------------------*/
 /*!
@@ -131,8 +134,10 @@ SimplePassChecker::operator()( const PredictState & state,
         return false;
     }
 
-    if ( receive_point.x <= ServerParam::i().ourPenaltyAreaLineX() + 3.0
-         && receive_point.absY() <= ServerParam::i().penaltyAreaHalfWidth() + 3.0 )
+    // Only block passes INTO our penalty area if the receiver is stationary there
+    // (no build-up possible). Allow passes near the edge for build-up play.
+    if ( receive_point.x <= ServerParam::i().ourPenaltyAreaLineX() + 1.0
+         && receive_point.absY() <= ServerParam::i().penaltyAreaHalfWidth() + 1.0 )
     {
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::PASS,
@@ -186,7 +191,19 @@ SimplePassChecker::operator()( const PredictState & state,
             continue;
         }
 
-        if ( ( (*o)->pos() - receive_point ).r2() < OPPONENT_DIST_THR2 )
+        // Zone-based opponent proximity threshold:
+        // In the box (x>25): allow passes to marked players — 1.5m threshold.
+        // In opponent half (x>0): moderate — 2.0m threshold.
+        // In our half: conservative — 3.0m threshold.
+        double opp_dist_thr2;
+        if ( receive_point.x > 25.0 )
+            opp_dist_thr2 = std::pow( 1.0, 2 );  // box: 1.0m — central striker always marked
+        else if ( receive_point.x > 0.0 )
+            opp_dist_thr2 = std::pow( 2.0, 2 );
+        else
+            opp_dist_thr2 = std::pow( 3.0, 2 );
+
+        if ( ( (*o)->pos() - receive_point ).r2() < opp_dist_thr2 )
         {
             return false;
         }
@@ -224,11 +241,23 @@ SimplePassChecker::operator()( const PredictState & state,
     }
 
 
-    double eval_threshold = PASS_EVAL_THRESHOLD;
+    // Dynamic threshold: short passes need less open corridor (receiver gets ball
+    // quickly before opponents react); long passes need more open path.
+    // Formula: base scales with distance, capped at min/max.
+    double eval_threshold;
+    if ( pass_dist < 8.0 )
+        eval_threshold = 7.0;   // short pass — generous
+    else if ( pass_dist < 18.0 )
+        eval_threshold = 7.0 + ( pass_dist - 8.0 ) * 0.35;  // 7..10.5°
+    else
+        eval_threshold = 10.5 + ( pass_dist - 18.0 ) * 0.15; // 10.5..13°
 
-    // MEJORADO: Detección más clara de pases hacia atrás
-    const double BACK_PASS_X_MARGIN = 1.0;  // Margen de 1m en lugar de 2m
+    // Offensive zone bonus: receiving in opponent half → less strict
+    if ( receive_point.x > 20.0 )
+        eval_threshold = std::max( eval_threshold - 2.0, 5.0 );
 
+    // Back pass: more permissive (defensive safety valve)
+    const double BACK_PASS_X_MARGIN = 1.0;
     if ( to.pos().x + BACK_PASS_X_MARGIN <= from.pos().x )
     {
         eval_threshold = BACK_PASS_EVAL_THRESHOLD;

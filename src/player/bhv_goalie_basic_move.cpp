@@ -61,6 +61,31 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
     const ServerParam & SP = ServerParam::i();
 
     // ---------------------------------------------------------------
+    // isDanger flag (Cyrus-style): suppress aggressive GK behavior when a
+    // teammate just kicked. Prevents the GK from abandoning goal during our
+    // own attacks or after a back-pass.  Cleared after 33 cycles (ball dies
+    // down) or when someone becomes kickable.
+    static bool s_is_danger   = false;
+    static int  s_danger_cycle = 0;
+    const  int  current_cycle  = wm.time().cycle();
+
+    if ( wm.lastKickerSide() == wm.ourSide() )
+    {
+        s_is_danger    = true;
+        s_danger_cycle = current_cycle;
+    }
+    if ( s_is_danger )
+    {
+        if ( wm.gameMode().type() != GameMode::PlayOn )
+            s_is_danger = false;
+        if ( current_cycle - s_danger_cycle > 33
+             && wm.ball().vel().r() > 1.0 )
+            s_is_danger = false;
+        if ( wm.kickableOpponent() || wm.kickableTeammate() )
+            s_is_danger = false;
+    }
+
+    // ---------------------------------------------------------------
     // PRIORITY 0: Tackle if possible
     if ( Bhv_BasicTackle( 1.0, 98.0 ).execute( agent ) ) return true;
 
@@ -102,8 +127,31 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
             if ( Bhv_GoalieChaseBall().execute( agent ) ) return true;
         }
 
-        // (C) Ball heading toward goal — chase it
-        if ( ball_coming && ball_pos.x < -30.0
+        // (B2) Lead-pass aggression: loose ball rolling fast toward our area.
+        //      Cyrus rule: only if GK reaches BEFORE teammate (don't abandon
+        //      goal if a teammate handles it), and not while team is attacking
+        //      (isDanger — ball was just kicked by us).
+        if ( !s_is_danger )
+        {
+            const Vector2D b_vel = wm.ball().vel();
+            const double penalty_x = SP.ourPenaltyAreaLineX();  // ≈ -36
+            if ( ball_is_loose
+                 && ball_pos.x < -22.0
+                 && ball_pos.x > penalty_x - 2.0   // outside or barely at area edge
+                 && b_vel.x < -0.5
+                 && b_vel.r() > 0.8
+                 && self_step <= opp_step + 5      // tighter than before
+                 && self_step < tm_step )           // Cyrus: only if GK is fastest
+            {
+                dlog.addText( Logger::TEAM, __FILE__": GK lead-pass aggression" );
+                agent->debugClient().addMessage( "GK_LeadPass" );
+                if ( Bhv_GoalieChaseBall().execute( agent ) ) return true;
+            }
+        }
+
+        // (C) Ball heading toward goal — chase it (also suppressed during isDanger)
+        if ( !s_is_danger
+             && ball_coming && ball_pos.x < -20.0
              && self_step <= opp_step + 3 )
         {
             dlog.addText( Logger::TEAM, __FILE__": GK chase incoming" );
@@ -210,6 +258,35 @@ Bhv_GoalieBasicMove::getTargetPoint( PlayerAgent * agent )
     }
 
     // ------------------------------------------------------------------
+    // 2b. 1v1 angle-closing: opponent has ball outside area but threatening.
+    //     Default base_move_x (-47 to -50) leaves a huge shooting angle.
+    //     Advance GK to close it. Only when truly 1v1 (no defender between).
+    // ------------------------------------------------------------------
+    if ( wm.kickableOpponent()
+         && ball_pos.x > SP.ourPenaltyAreaLineX()  // outside penalty area
+         && ball_pos.x < -15.0                      // within shooting range
+         && ball_pos.absY() < SP.penaltyAreaHalfWidth() + 2.0 )
+    {
+        bool has_defender_cover = false;
+        for ( const PlayerObject * tm : wm.teammates() )
+        {
+            if ( ! tm || tm->goalie() ) continue;
+            // Defender is between ball and goal and closer to goal than ball
+            if ( tm->pos().x < ball_pos.x && tm->pos().x > -45.0
+                 && tm->pos().dist( ball_pos ) < 8.0 )
+            {
+                has_defender_cover = true;
+                break;
+            }
+        }
+        if ( ! has_defender_cover )
+        {
+            // Advance to close angle — x=-43 cuts shooting angle significantly
+            base_move_x = std::max( base_move_x, -43.0 );
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 3. Near-post coverage: when ball is wide (large |Y|) and deep,
     //    the GK must move to the near post, not stay in the center.
     //    This is the #1 cause of goals against us.
@@ -241,11 +318,54 @@ Bhv_GoalieBasicMove::getTargetPoint( PlayerAgent * agent )
     }
 
     // ------------------------------------------------------------------
-    // 5. Normal case: position on ball-to-goal bisecting line
-    //    The GK stands where the line from ball to center of goal
-    //    (offset behind goal for proper angle) crosses base_move_x.
+    // 5. Normal case: position on ball trajectory or bisecting line
     // ------------------------------------------------------------------
     {
+        const double y_buf = 0.3;
+
+        // ── RoboCIn 2024: Orthogonal projection to ball trajectory ──
+        // When ball is moving toward our goal, position at the point where
+        // the ball's trajectory crosses our GK depth line (base_move_x).
+        // This is more accurate than the static bisecting-line approach
+        // because it accounts for ball direction, not just ball position.
+        const Vector2D ball_vel = wm.ball().vel();
+        const double ball_speed = ball_vel.r();
+        if ( ball_vel.x < -0.3 && ball_speed > 0.5
+             && ball_pos.x > base_move_x )
+        {
+            // Find t > 0 where ball crosses x = base_move_x
+            double t = ( base_move_x - ball_pos.x ) / ball_vel.x;
+            if ( t > 0.0 && t < 80.0 )
+            {
+                double traj_y = ball_pos.y + ball_vel.y * t;
+
+                // Also compute bisecting-line Y (fallback for slow balls)
+                const double x_back = 3.5;
+                const Vector2D base_point( -pitch_half_l - x_back, 0.0 );
+                Vector2D ball_point_bis = ball_pos;
+                if ( ball_point_bis.x < base_point.x + 0.1 )
+                    ball_point_bis.x = base_point.x + 0.1;
+                Line2D ball_line_bis( ball_point_bis, base_point );
+                double bisect_y = ball_line_bis.getY( base_move_x );
+
+                // Blend: fast ball → trust trajectory fully; slow ball → bisect
+                double traj_w = std::min( 1.0, ( ball_speed - 0.5 ) / 1.5 );
+                double move_y = traj_y * traj_w + bisect_y * ( 1.0 - traj_w );
+
+                if ( move_y > goal_half_w - y_buf )  move_y = goal_half_w - y_buf;
+                if ( move_y < -goal_half_w + y_buf ) move_y = -goal_half_w + y_buf;
+
+                agent->debugClient().addMessage( "GK_OrthoProj" );
+                dlog.addText( Logger::TEAM,
+                              __FILE__": getTarget ortho-proj t=%.1f y=%.2f",
+                              t, move_y );
+                return Vector2D( base_move_x, move_y );
+            }
+        }
+
+        // ── Standard bisecting line (ball static or moving away) ──
+        //    GK stands where the line from ball to virtual point behind goal
+        //    crosses base_move_x, blended with direct Y-tracking for far balls.
         const double x_back = 3.5;  // virtual point behind goal
         const Vector2D base_point( -pitch_half_l - x_back, 0.0 );
 
@@ -270,10 +390,14 @@ Bhv_GoalieBasicMove::getTargetPoint( PlayerAgent * agent )
         }
 
         Line2D ball_line( ball_point, base_point );
-        double move_y = ball_line.getY( base_move_x );
+        double line_y = ball_line.getY( base_move_x );
 
-        // Clamp to goal posts with small buffer
-        const double y_buf = 0.3;
+        // Far ball → blend with direct ball-Y tracking to avoid GK looking "frozen"
+        double direct_y = ball_pos.y * 0.45;
+        double ball_dist_x = std::fabs( ball_pos.x - base_move_x );
+        double blend = std::min( 1.0, std::max( 0.0, (ball_dist_x - 15.0) / 30.0 ) );
+        double move_y = line_y * (1.0 - blend) + direct_y * blend;
+
         if ( move_y > goal_half_w - y_buf )  move_y = goal_half_w - y_buf;
         if ( move_y < -goal_half_w + y_buf ) move_y = -goal_half_w + y_buf;
 
@@ -299,11 +423,17 @@ Bhv_GoalieBasicMove::getBasicDashPower( PlayerAgent * agent,
         return ServerParam::i().maxDashPower();
     }
 
+    // Ball coming fast toward goal → always max power to reposition
+    if ( wm.ball().vel().x < -0.5 && wm.ball().pos().x < -15.0 )
+    {
+        return ServerParam::i().maxDashPower();
+    }
+
     if ( wm.ball().pos().x > -30.0 )
     {
         if ( wm.self().stamina() < ServerParam::i().staminaMax() * 0.9 )
         {
-            return my_inc * 0.5;
+            return my_inc * 0.7;  // was 0.5 — faster repositioning when ball is far
         }
         agent->debugClient().addMessage( "P1" );
         return my_inc;

@@ -63,11 +63,15 @@ s_get_ball_speed_for_pass( const double & distance )
 {
     if ( distance >= 25.0 )
     {
-        return 2.8;   // near max ball speed (3.0) for long passes
+        return 2.8;
     }
     else if ( distance >= 15.0 )
     {
         return 2.5;
+    }
+    else if ( distance >= 12.0 )
+    {
+        return 2.3;
     }
     else if ( distance >= 8.0 )
     {
@@ -79,7 +83,7 @@ s_get_ball_speed_for_pass( const double & distance )
     }
     else
     {
-        return 1.7;
+        return 1.9;   // snappier short passes for quick combinations
     }
 }
 
