@@ -83,18 +83,52 @@ Bhv_MarkOpponent::execute( PlayerAgent * agent )
 
     if ( ! mark_target ) return false;
 
-    // ── Calcular posición de marcaje: entre rival y portería ─────────────
-    Vector2D opp_to_goal = goal_center - mark_target->pos();
-    if ( opp_to_goal.r() > 0.001 )
-        opp_to_goal.setLength( 1.8 );  // 1.8m hacia la portería desde el rival
+    const Vector2D opp_pos = mark_target->pos();
 
-    Vector2D mark_pos = mark_target->pos() + opp_to_goal;
+    // ── Posición de corte de pase: sobre la línea balón→rival ────────────
+    // Proyectamos la posición del balón al momento en que el rival lo recibiría
+    const int opp_reach = wm.interceptTable().opponentStep();
+    const Vector2D ball_pos = wm.ball().inertiaPoint( opp_reach );
+    const double ball_opp_dist = opp_pos.dist( ball_pos );
+
+    // Buscamos el punto de la línea balón→rival más cercano a nosotros
+    // (dentro de 12m del rival y sin sobrepasar al balón)
+    const AngleDeg ball_dir = ( ball_pos - opp_pos ).th();
+    Vector2D pass_cut_pos = opp_pos + Vector2D::polar2vector( 1.0, ball_dir );
+    double   min_self_dist = wm.self().pos().dist( pass_cut_pos );
+
+    for ( double d = 2.0; d < std::min( ball_opp_dist, 12.0 ); d += 1.0 )
+    {
+        Vector2D cand = opp_pos + Vector2D::polar2vector( d, ball_dir );
+        const double dist = wm.self().pos().dist( cand );
+        if ( dist < min_self_dist )
+        {
+            min_self_dist = dist;
+            pass_cut_pos  = cand;
+        }
+    }
+
+    // ── Posición lado-portería (fallback para zona de peligro) ───────────
+    Vector2D opp_to_goal = goal_center - opp_pos;
+    if ( opp_to_goal.r() > 0.001 )
+        opp_to_goal.setLength( 1.8 );
+    const Vector2D goal_side_pos = opp_pos + opp_to_goal;
+
+    // ── Blend: corte de pase lejos, lado-portería cerca ──────────────────
+    // blend=1 → 100% corte de pase (rival lejos de portería)
+    // blend=0 → 100% lado portería (rival en zona peligrosa, dist < 5m)
+    const double opp_goal_dist = opp_pos.dist( goal_center );
+    const double blend = std::min( 1.0, std::max( 0.0,
+                             ( opp_goal_dist - 5.0 ) / 15.0 ) );
+
+    Vector2D mark_pos = pass_cut_pos * blend + goal_side_pos * ( 1.0 - blend );
+
+    // ── Compresión lateral: acercarse al Y del balón para cubrir pases al lado
+    const double y_diff = ball_pos.y - mark_pos.y;
+    mark_pos.y += y_diff * 0.3;
 
     // Limitar para no entrar demasiado en la portería
     mark_pos.x = std::max( mark_pos.x, -SP.pitchHalfLength() + 2.0 );
-
-    // ── Señalar al rival con el brazo (PointTo) ───────────────────────────
-    agent->setArmAction( new Arm_PointToPoint( mark_target->pos() ) );
 
     dlog.addText( Logger::TEAM,
                   __FILE__": MarkOpponent unum=%d pos=(%.1f %.1f) mark_pos=(%.1f %.1f)",

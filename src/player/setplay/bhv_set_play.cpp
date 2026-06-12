@@ -607,6 +607,51 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
     const WorldModel & wm = agent->world();
     const ServerParam & SP = ServerParam::i();
 
+    // ── Cobertura del balón (falta rival en nuestra mitad) ──────────────────
+    // Un jugador se planta en la línea balón→portería justo fuera del círculo
+    // reglamentario (9.15m) para tapar el tiro directo y el centro tenso.
+    // Asignación determinista: el jugador de campo más cercano al punto.
+    if ( wm.ball().pos().x < -15.0 && ! wm.self().goalie() )
+    {
+        const Vector2D our_goal( -SP.pitchHalfLength(), 0.0 );
+        Vector2D dir = our_goal - wm.ball().pos();
+        const double len = dir.r();
+        if ( len > 1.0 )
+        {
+            Vector2D cover_point = wm.ball().pos() + dir * ( 10.5 / len );
+            cover_point.x = std::max( cover_point.x, -SP.pitchHalfLength() + 1.5 );
+
+            const double my_d = wm.self().pos().dist( cover_point );
+            bool i_am_nearest = true;
+            for ( const PlayerObject * tm : wm.teammates() )
+            {
+                if ( ! tm || tm->goalie() ) continue;
+                if ( tm->pos().dist( cover_point ) < my_d - 1.0 )
+                {
+                    i_am_nearest = false;
+                    break;
+                }
+            }
+
+            if ( i_am_nearest )
+            {
+                agent->debugClient().addMessage( "SetPlayCoverBall" );
+                agent->debugClient().setTarget( cover_point );
+                dlog.addText( Logger::TEAM,
+                              __FILE__": their setplay, cover ball lane (%.1f, %.1f)",
+                              cover_point.x, cover_point.y );
+
+                double dash_power = Bhv_SetPlay::get_set_play_dash_power( agent );
+                if ( ! Body_GoToPoint( cover_point, 0.7, dash_power ).execute( agent ) )
+                {
+                    Body_TurnToBall().execute( agent );
+                }
+                agent->setNeckAction( new Neck_TurnToBall() );
+                return;
+            }
+        }
+    }
+
     // ── RoboCIn 2024 §3: Set Play Marking (deterministic assignment) ──
     // All eligible players compute the same sorted assignment independently,
     // avoiding double-marking without shared state.
@@ -618,11 +663,13 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
         const Vector2D home_pos = Strategy::i().getPosition( wm.self().unum() );
         const Vector2D our_goal( -SP.pitchHalfLength(), 0.0 );
 
-        const bool is_defensive  = ( home_pos.isValid() && home_pos.x < -10.0 );
         const bool ball_our_half = ( ball_pos.x < -15.0 );
+        // Los defensas SÍ marcan con balón en nuestra mitad. Excluirlos
+        // dejaba a los rivales del área sin marcar en las faltas más
+        // peligrosas: los medios/puntas elegibles fallaban después el
+        // límite de distancia a su home y nadie ejecutaba la marca.
         const bool should_mark   = ! wm.self().goalie()
-                                   && ball_pos.x < 15.0
-                                   && ! ( is_defensive && ball_our_half );
+                                   && ball_pos.x < 15.0;
 
         if ( should_mark )
         {
@@ -650,8 +697,6 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
             {
                 if ( ! tm || tm->goalie() ) continue;
                 const Vector2D tm_home = Strategy::i().getPosition( tm->unum() );
-                const bool tm_def = ( tm_home.isValid() && tm_home.x < -10.0 );
-                if ( tm_def && ball_our_half ) continue;
                 double hy = tm_home.isValid() ? tm_home.y : tm->pos().y;
                 marker_hy_unum.emplace_back( hy, tm->unum() );
             }
@@ -675,7 +720,9 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
             if ( my_rank >= 0 && my_rank < (int)threats.size() )
             {
                 const PlayerObject * cand = threats[my_rank];
-                // Home-deviation constraint: mark pos must be within 8m of home
+                // Home-deviation constraint: con balón en nuestra mitad se
+                // amplía (13m) — las marcas del área importan más que la forma
+                const double max_home_dev = ball_our_half ? 13.0 : 8.0;
                 if ( home_pos.isValid() )
                 {
                     Vector2D opp_to_goal = our_goal - cand->pos();
@@ -683,7 +730,7 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
                     Vector2D mark_pt = ( len > 0.1 )
                         ? cand->pos() + opp_to_goal * ( 0.9 / len )
                         : cand->pos();
-                    if ( home_pos.dist( mark_pt ) <= 8.0 )
+                    if ( home_pos.dist( mark_pt ) <= max_home_dev )
                         mark_target = cand;
                 }
                 else

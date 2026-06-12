@@ -91,6 +91,10 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
 
     // ---------------------------------------------------------------
     // PRIORITY 1: Intercept / react based on WHO has the ball
+    // Solo con balón vivo: en faltas rivales cerca del área el pateador
+    // junto al balón cuenta como kickableOpponent y la rama (A) mandaba
+    // al GK a perseguir un balón muerto — salía y regresaba en bucle.
+    if ( wm.gameMode().type() == GameMode::PlayOn )
     {
         const int self_step = wm.interceptTable().selfStep();
         const int tm_step   = wm.interceptTable().teammateStep();
@@ -105,22 +109,39 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
         const bool tm_has_ball  = ( wm.kickableTeammate() != nullptr );
         const bool ball_is_loose = ( ! opp_has_ball && ! tm_has_ball );
 
-        // (A) OPPONENT has ball in/near our penalty area → COME OUT aggressively
-        //     The GK must rush to cut angle / block shot. Be very generous
-        //     with step tolerance because contesting is better than staying back.
-        if ( opp_has_ball && ball_in_area )
+        // Cobertura propia sobre el balón: con defensas encima del balón,
+        // salir solo regala la portería. El GK únicamente sale sin importar
+        // la cobertura cuando el balón está en la puerta de su arco.
+        int mates_on_ball = 0;
+        for ( const PlayerObject * tm : wm.teammatesFromBall() )
         {
-            dlog.addText( Logger::TEAM, __FILE__": GK rush opp in area" );
+            if ( ! tm || tm->goalie() ) continue;
+            if ( tm->distFromBall() > 5.0 ) break;  // lista ordenada por distancia
+            ++mates_on_ball;
+        }
+        const bool ball_in_goal_area =
+            ( ball_pos.x < -SP.pitchHalfLength() + SP.goalAreaLength() + 2.0
+              && ball_pos.absY() < SP.goalAreaWidth() * 0.5 + 3.0 );
+
+        // (A) OPPONENT has ball in/near our penalty area → COME OUT
+        //     SOLO si es un 1v1 real (nadie nuestro sobre el balón) o el
+        //     balón ya está en el área de meta. Antes salía siempre, incluso
+        //     con 3 compañeros presionando, y dejaba el arco vacío.
+        if ( opp_has_ball && ball_in_area
+             && ( mates_on_ball == 0 || ball_in_goal_area ) )
+        {
+            dlog.addText( Logger::TEAM, __FILE__": GK rush opp in area (1v1)" );
             agent->debugClient().addMessage( "GK_RushOpp" );
             if ( Bhv_GoalieChaseBall().execute( agent ) ) return true;
         }
 
         // (B) Ball is LOOSE in the area (cross, deflection, failed pass)
-        //     → intercept if GK can reach within reasonable cycles
+        //     → salir solo si llega ANTES que el rival y que el compañero.
+        //     El margen +5 anterior lo hacía salir llegando tarde: el rival
+        //     recibía con el GK a medio camino (de ahí el "no reacciona").
         if ( ball_is_loose && ball_in_area
-             && ( self_step <= opp_step + 5
-                  || self_step <= tm_step + 2
-                  || self_step <= 8 ) )
+             && ( ( self_step <= opp_step - 1 && self_step <= tm_step )
+                  || ball_in_goal_area ) )
         {
             dlog.addText( Logger::TEAM, __FILE__": GK intercept loose ball" );
             agent->debugClient().addMessage( "GK_Loose" );
@@ -140,7 +161,7 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
                  && ball_pos.x > penalty_x - 2.0   // outside or barely at area edge
                  && b_vel.x < -0.5
                  && b_vel.r() > 0.8
-                 && self_step <= opp_step + 5      // tighter than before
+                 && self_step <= opp_step - 1      // gana la carrera, no la empata
                  && self_step < tm_step )           // Cyrus: only if GK is fastest
             {
                 dlog.addText( Logger::TEAM, __FILE__": GK lead-pass aggression" );
@@ -152,7 +173,7 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
         // (C) Ball heading toward goal — chase it (also suppressed during isDanger)
         if ( !s_is_danger
              && ball_coming && ball_pos.x < -20.0
-             && self_step <= opp_step + 3 )
+             && self_step <= opp_step )
         {
             dlog.addText( Logger::TEAM, __FILE__": GK chase incoming" );
             agent->debugClient().addMessage( "GK_Chase" );
@@ -160,9 +181,10 @@ bool Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
         }
 
         // (D) Standard intercept (nobody has ball, ball near area)
+        //     Solo si gana claramente la carrera o el balón está en su puerta.
         if ( ball_in_area
-             && ( self_step <= opp_step + 3
-                  || self_step <= tm_step ) )
+             && ( ( self_step < opp_step && self_step <= tm_step )
+                  || ball_in_goal_area ) )
         {
             dlog.addText( Logger::TEAM, __FILE__": GK intercept standard" );
             agent->debugClient().addMessage( "GK_Intercept" );
@@ -262,7 +284,10 @@ Bhv_GoalieBasicMove::getTargetPoint( PlayerAgent * agent )
     //     Default base_move_x (-47 to -50) leaves a huge shooting angle.
     //     Advance GK to close it. Only when truly 1v1 (no defender between).
     // ------------------------------------------------------------------
-    if ( wm.kickableOpponent()
+    if ( wm.gameMode().type() == GameMode::PlayOn  // balón muerto no es 1v1:
+         // en una falta el "kickableOpponent" es el pateador y los defensas
+         // están a 9.15m por regla, así que nunca hay "defender cover"
+         && wm.kickableOpponent()
          && ball_pos.x > SP.ourPenaltyAreaLineX()  // outside penalty area
          && ball_pos.x < -15.0                      // within shooting range
          && ball_pos.absY() < SP.penaltyAreaHalfWidth() + 2.0 )

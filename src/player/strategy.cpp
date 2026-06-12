@@ -76,6 +76,7 @@
 using namespace rcsc;
 
 const std::string Strategy::BEFORE_KICK_OFF_CONF = "before-kick-off.conf";
+const std::string Strategy::BEFORE_KICK_OFF_OUR_CONF = "before-kick-off-our.conf";
 const std::string Strategy::NORMAL_FORMATION_CONF = "normal-formation.conf";
 const std::string Strategy::DEFENSE_FORMATION_CONF = "defense-formation.conf";
 const std::string Strategy::OFFENSE_FORMATION_CONF = "offense-formation.conf";
@@ -228,6 +229,15 @@ Strategy::read( const std::string & formation_dir )
     {
         std::cerr << "Failed to read before_kick_off formation" << std::endl;
         return false;
+    }
+    // saque propio: variante con el pateador junto al balón (opcional,
+    // si falta el archivo se usa la formación de kick-off normal)
+    M_before_kick_off_our_formation = createFormation( configpath + BEFORE_KICK_OFF_OUR_CONF );
+    if ( ! M_before_kick_off_our_formation )
+    {
+        std::cerr << "before-kick-off-our.conf not found, using before-kick-off.conf"
+                  << std::endl;
+        M_before_kick_off_our_formation = M_before_kick_off_formation;
     }
     M_after_goal_formation = createFormation( configpath + AFTER_GOAL_FORMATION_CONF );  
     if ( ! M_after_goal_formation )  
@@ -557,7 +567,8 @@ Strategy::createRole( const int unum,
 void
 Strategy::updateSituation( const WorldModel & wm )
 {
-    M_current_situation = Normal_Situation;
+    // Do NOT reset to Normal here — preserve previous value for hysteresis.
+    // The previous M_current_situation is the default unless explicitly changed.
 
     if ( wm.gameMode().type() != GameMode::PlayOn )
     {
@@ -582,29 +593,91 @@ Strategy::updateSituation( const WorldModel & wm )
         return;
     }
 
+    // ── Score-based situation override ───────────────────────────────────
+    const int our_score = ( wm.ourSide() == LEFT
+                            ? wm.gameMode().scoreLeft()
+                            : wm.gameMode().scoreRight() );
+    const int opp_score = ( wm.ourSide() == LEFT
+                            ? wm.gameMode().scoreRight()
+                            : wm.gameMode().scoreLeft() );
+    const int score_diff    = our_score - opp_score;
+    // actualHalfTime() está en ciclos (3000); halfTime() son segundos (300)
+    // y hacía que "últimos 400 ciclos" se activara desde el ciclo 200.
+    const int total_cycles  = ServerParam::i().actualHalfTime()
+                              * ServerParam::i().nrNormalHalfs();
+    const int remaining     = total_cycles - wm.time().cycle();
+
     int self_min = wm.interceptTable().selfStep();
     int mate_min = wm.interceptTable().teammateStep();
     int opp_min = wm.interceptTable().opponentStep();
     int our_min = std::min( self_min, mate_min );
+    const double ball_x = wm.ball().pos().x;
 
-    if ( opp_min <= our_min - 2 )
+    // Overrides por marcador: SOLO si disputamos el balón. Sin esta condición,
+    // ir perdiendo 2+ forzaba Offense_Situation todo el partido aunque el
+    // rival tuviera el balón → formación ofensiva defendiendo, estructura rota
+    // y espiral de fatiga (se vio vs RoboCIn perdiendo 0-2).
+    const bool ball_contested = ( our_min <= opp_min + 2 );
+
+    // Losing by 2+ → push to attack while we contest the ball
+    if ( score_diff <= -2 && ball_contested )
     {
         dlog.addText( Logger::TEAM,
-                      __FILE__": Situation Defense" );
+                      __FILE__": Situation Offense (losing %d, urgent attack)",
+                      -score_diff );
+        M_current_situation = Offense_Situation;
+        return;
+    }
+
+    // Losing by 1 in the last 400 cycles → attack to equalize
+    if ( score_diff == -1 && remaining <= 400 && ball_contested )
+    {
+        dlog.addText( Logger::TEAM,
+                      __FILE__": Situation Offense (losing 1, %d cycles left)",
+                      remaining );
+        M_current_situation = Offense_Situation;
+        return;
+    }
+
+    // ── Defense trigger ───────────────────────────────────────────────
+    // Enter defense when:
+    //   (a) opponent winning ball race (no cycle advantage needed), OR
+    //   (b) ball is in our half and situation is contested (within 2 cycles)
+    // Hysteresis: once in defense, exit ONLY when we have clear ball advantage (3+ cycles).
+    const bool opp_winning  = ( opp_min <= our_min );
+    const bool ball_our_half_contested = ( ball_x < 0.0 && opp_min <= our_min + 2 );
+
+    if ( opp_winning || ball_our_half_contested )
+    {
+        dlog.addText( Logger::TEAM,
+                      __FILE__": Situation Defense (opp_min=%d our_min=%d ball_x=%.1f)",
+                      opp_min, our_min, ball_x );
         M_current_situation = Defense_Situation;
         return;
     }
 
-    if ( our_min <= opp_min - 2 )
+    // Hysteresis: if already defending, stay until we clearly win ball (3-cycle gap)
+    if ( M_current_situation == Defense_Situation && our_min < opp_min + 3 )
     {
         dlog.addText( Logger::TEAM,
-                      __FILE__": Situation Offense" );
+                      __FILE__": Situation Defense (hysteresis, our_min=%d opp_min=%d)",
+                      our_min, opp_min );
+        return;
+    }
+
+    // ── Offense trigger ───────────────────────────────────────────────
+    const int offense_threshold = ( score_diff >= 2 ) ? 3 : 2;
+    if ( our_min <= opp_min - offense_threshold )
+    {
+        dlog.addText( Logger::TEAM,
+                      __FILE__": Situation Offense (thr=%d score=%d)", offense_threshold, score_diff );
         M_current_situation = Offense_Situation;
         return;
     }
 
     dlog.addText( Logger::TEAM,
                   __FILE__": Situation Normal" );
+    M_current_situation = Normal_Situation;
 }
 
 /*-------------------------------------------------------------------*/
@@ -648,6 +721,7 @@ Strategy::updatePosition( const WorldModel & wm )
 
     M_positions.clear();
     f->getPositions( ball_pos, M_positions );
+    applyDynamicFormationShifts( wm, ball_pos );
 
     // G2d: various states
     bool indFK = false;
@@ -1284,10 +1358,24 @@ Strategy::getFormation( const WorldModel & wm ) const
     //
     // before kick off
     //
-    if ( wm.gameMode().type() == GameMode::BeforeKickOff )  
-    {  
-        return M_before_kick_off_formation;  
-    } 
+    if ( wm.gameMode().type() == GameMode::BeforeKickOff )
+    {
+        return M_before_kick_off_formation;
+    }
+
+    //
+    // kick off (tras el silbato): mantener la forma compacta del saque.
+    // Sin esta rama caía al fallback isOurSetPlay() → setplay-our-formation,
+    // que dispersaba a los jugadores lejos de sus posiciones de saque.
+    //
+    if ( wm.gameMode().type() == GameMode::KickOff_ )
+    {
+        if ( wm.gameMode().side() == wm.ourSide() )
+        {
+            return M_before_kick_off_our_formation;
+        }
+        return M_before_kick_off_formation;
+    }
 
     if ( wm.gameMode().type() == GameMode::AfterGoal_ )
     {  
@@ -1612,10 +1700,13 @@ Strategy::get_normal_dash_power( const WorldModel & wm )
     // Burning all stamina early leaves the player degraded in late game.
     if ( self_min <= mate_min )
     {
-        // Conserve when stamina is critically low and not an emergency intercept
-        // (stamina < 35% means effort is decaying; capacity drain is permanent)
+        // Suelo duro: por debajo de recoverDecThr (2400) el recovery se daña
+        // PERMANENTEMENTE. El umbral anterior (25% = 2000) ya estaba por
+        // debajo y dejaba jugadores arruinados para el resto del partido.
+        // Margen +600 para no rozar el umbral; excepción solo intercepción
+        // inmediata (self_min <= 3).
         if ( ! wm.self().staminaModel().capacityIsEmpty()
-             && wm.self().stamina() < ServerParam::i().staminaMax() * 0.25
+             && wm.self().stamina() < ServerParam::i().recoverDecThrValue() + 600.0
              && self_min > 3 )
         {
             double conservative = wm.self().playerType().staminaIncMax()
@@ -1719,4 +1810,149 @@ Strategy::get_normal_dash_power( const WorldModel & wm )
     }
 
     return dash_power;
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+  Per-player defensive threshold — adapted from Cyrus isDefenseSituation.
+  Each role has a different "dif" based on ball position:
+    backs  (2-5): dif=3 in own half  → need 3-cycle advantage to attack
+    halves (6-8): dif=2 in own half  → need 2-cycle advantage
+    fwds   (9-11): dif=-2            → almost never personally defensive
+  Defense if: opp_min - our_min < dif
+*/
+bool
+Strategy::isPersonalDefenseSituation( const WorldModel & wm, int unum ) const
+{
+    const int self_min = wm.interceptTable().selfStep();
+    const int mate_min = wm.interceptTable().teammateStep();
+    const int opp_min  = wm.interceptTable().opponentStep();
+    const int our_min  = std::min( self_min, mate_min );
+
+    const int role = roleNumber( unum );
+    const double ball_x = wm.ball().inertiaPoint(
+                              std::min( our_min, opp_min ) ).x;
+
+    int dif = 0;
+
+    if ( role >= 2 && role <= 5 )        // backs
+    {
+        if      ( ball_x < -20.0 ) dif = 3;
+        else if ( ball_x <  20.0 ) dif = 2;
+        else if ( ball_x <  40.0 ) dif = 1;
+        else                        dif = 0;
+    }
+    else if ( role >= 6 && role <= 8 )   // halves
+    {
+        if      ( ball_x < -20.0 ) dif = 2;
+        else if ( ball_x <  20.0 ) dif = 2;
+        else if ( ball_x <  40.0 ) dif = 0;
+        else                        dif = -2;
+    }
+    else                                 // forwards (9-11)
+    {
+        dif = -2;
+    }
+
+    return ( opp_min - our_min ) < dif;
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+  Dynamic formation shifts applied after f->getPositions().
+  Inspired by Cyrus updateFormation523():
+    Defense: role 6 (defensive half) drops to back line → compact 5-2-3
+    Offense + losing: roles 4-5 (side backs) push forward → attacking 3-4-3
+    Deep defense: roles 7-8 (off. halves) compress backward
+*/
+void
+Strategy::applyDynamicFormationShifts( const WorldModel & wm,
+                                        const Vector2D & ball_pos )
+{
+    if ( (int)M_positions.size() < 11 ) return;
+    if ( wm.gameMode().type() != GameMode::PlayOn ) return;
+
+    const int our_score = ( wm.ourSide() == LEFT
+                            ? wm.gameMode().scoreLeft()
+                            : wm.gameMode().scoreRight() );
+    const int opp_score = ( wm.ourSide() == LEFT
+                            ? wm.gameMode().scoreRight()
+                            : wm.gameMode().scoreLeft() );
+    const int score_diff = our_score - opp_score;
+
+    const int opp_min  = wm.interceptTable().opponentStep();
+    const int mate_min = std::min( wm.interceptTable().teammateStep(),
+                                   wm.interceptTable().selfStep() );
+
+    // ── F523: role 6 (idx 5) drops to back line when defending ──────────
+    // Condition mirrors Cyrus: ball in own half OR opponent wins ball race by 2+
+    if ( ball_pos.x < 15.0 || opp_min < mate_min - 2 )
+    {
+        // Drop role 6 to be level with the deepest side-back (role 4 or 5)
+        const double back_line_x = std::min( M_positions[3].x,
+                                              M_positions[4].x );
+        if ( M_positions[5].x > back_line_x )
+        {
+            M_positions[5].x = back_line_x + 1.0; // 1m ahead of back line
+            dlog.addText( Logger::TEAM,
+                          __FILE__": F523: role6 drops to x=%.1f",
+                          M_positions[5].x );
+        }
+    }
+
+    // ── Offensive push: roles 4-5 (idx 3-4) advance when losing ────────
+    // Only when ball is in opponent half AND losing — conservative push
+    if ( M_current_situation == Offense_Situation
+         && score_diff <= -1
+         && ball_pos.x > 10.0 )  // solo cuando el balon ya esta en campo rival
+    {
+        const double push = 3.0;  // push conservador: 3m max
+        M_positions[3].x = std::min( M_positions[3].x + push, 10.0 );
+        M_positions[4].x = std::min( M_positions[4].x + push, 10.0 );
+        dlog.addText( Logger::TEAM,
+                      __FILE__": F523: roles4-5 push forward %.1fm (losing %d)",
+                      push, -score_diff );
+    }
+
+    // ── Proteger ventaja: ganando en el tramo final → bloque bajo ───────
+    // Rama simétrica al push ofensivo: medios comprimen y los laterales
+    // no suben, para cerrar el partido sin regalar transiciones.
+    {
+        const int total_cycles = ServerParam::i().actualHalfTime()
+                                 * ServerParam::i().nrNormalHalfs();
+        const int remaining    = total_cycles - wm.time().cycle();
+
+        if ( score_diff >= 1 && remaining < 600 && ball_pos.x < 30.0 )
+        {
+            for ( int i = 5; i <= 7; ++i )  // roles 6-8
+            {
+                M_positions[i].x = std::max( M_positions[i].x - 4.0, -36.0 );
+            }
+            // Side backs (roles 4-5) no pasan de -10
+            M_positions[3].x = std::min( M_positions[3].x, -10.0 );
+            M_positions[4].x = std::min( M_positions[4].x, -10.0 );
+
+            dlog.addText( Logger::TEAM,
+                          __FILE__": F523: protect lead (+%d, %d cycles left) → low block",
+                          score_diff, remaining );
+        }
+    }
+
+    // ── Deep defense: roles 7-8 (idx 6-7) compress back ────────────────
+    if ( ball_pos.x < -30.0
+         && M_current_situation == Defense_Situation )
+    {
+        const double cb_x = std::min( M_positions[1].x, M_positions[2].x );
+        for ( int i = 6; i <= 7; i++ )
+        {
+            double new_x = std::max( M_positions[i].x - 3.0, cb_x + 4.0 );
+            if ( new_x < M_positions[i].x )
+            {
+                M_positions[i].x = new_x;
+            }
+        }
+        dlog.addText( Logger::TEAM,
+                      __FILE__": F523: roles7-8 compress back (ball x=%.1f)",
+                      ball_pos.x );
+    }
 }

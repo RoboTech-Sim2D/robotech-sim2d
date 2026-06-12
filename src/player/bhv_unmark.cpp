@@ -426,9 +426,21 @@ double Bhv_Unmark::evaluate_position(const WorldModel &wm, const UnmarkPosition 
     sum_eval /= unmark_position.pass_list.size();
     sum_eval += (sum_eval * unmark_position.pass_list.size() / 10);
     sum_eval += best_pass_eval;
-    sum_eval += opp_eval;
+    // Cap: el espacio abierto no debe dominar el scoring — sin tope, el
+    // desmarque siempre huye a la banda (espacio máximo, peligro mínimo).
+    sum_eval += std::min( opp_eval, 6.0 );
     (!have_turn) ? sum_eval += 10 : sum_eval += 0;
     (up_pos) ? sum_eval += 10 : sum_eval += 0;
+
+    // Profundidad: premiar avance real hacia la portería rival
+    sum_eval += std::max( 0.0, unmark_position.target.x - wm.self().pos().x ) * 0.8;
+
+    // P11 (CenterForward) debe mantenerse central: desmarques anchos
+    // abandonan el punto de penalti y solo generan tiros de esquina.
+    const int role = Strategy::i().roleNumber( wm.self().unum() );
+    if ( role == 11 && unmark_position.target.absY() > 8.0 )
+        sum_eval -= ( unmark_position.target.absY() - 8.0 ) * 2.0;
+
     return sum_eval;
 }
 

@@ -31,6 +31,8 @@
 #include "role_center_back.h"
 
 #include "bhv_basic_move.h"
+#include "bhv_defensive_move.h"
+#include "strategy.h"
 
 #include "planner/bhv_planned_action.h"
 #include "basic_actions/body_hold_ball.h"
@@ -107,5 +109,8 @@ RoleCenterBack::doKick( PlayerAgent * agent )
 void
 RoleCenterBack::doMove( PlayerAgent * agent )
 {
+    if ( Strategy::i().isPersonalDefenseSituation( agent->world(), agent->world().self().unum() ) ) {
+        if ( Bhv_DefensiveMove().execute( agent ) ) return;
+    }
     Bhv_BasicMove().execute( agent );
 }

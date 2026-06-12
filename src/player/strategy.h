@@ -50,6 +50,19 @@ class CmdLineParser;
 class WorldModel;
 }
 
+// Key parameters for the ported Cyrus defensive system.
+// Start with the calibrated constants; tune after match data is collected.
+struct DefenseMoveSetting {
+    double midTh_posFinderHPosXNegativeTerm { 5.0 };
+    double midTh_posFinderBackDistXPlusTerm { 2.0 };
+    double antiDefThreshold                 { 2.0 };
+    double midMarkThreshold                 { 1.5 };
+    double goalMarkThreshold                { 0.5 };
+    double dangerMarkRadius                 { 15.0 };
+    double throughPassDangerDist            { 12.0 };
+    double blockMinPowerRate                { 0.3  };
+};
+
 enum PositionType {
     Position_Left = -1,
     Position_Center = 0,
@@ -69,6 +82,7 @@ enum SituationType {
 class Strategy {
 public:
     static const std::string BEFORE_KICK_OFF_CONF;
+    static const std::string BEFORE_KICK_OFF_OUR_CONF;
     static const std::string NORMAL_FORMATION_CONF;
     static const std::string DEFENSE_FORMATION_CONF;
     static const std::string OFFENSE_FORMATION_CONF;
@@ -95,6 +109,12 @@ public:
         BA_None
     };
 
+    static const DefenseMoveSetting & defenseSetting()
+      {
+          static const DefenseMoveSetting s;
+          return s;
+      }
+
 private:
     //
     // factories
@@ -111,6 +131,7 @@ private:
     //
 
     rcsc::Formation::Ptr M_before_kick_off_formation;
+    rcsc::Formation::Ptr M_before_kick_off_our_formation;
 
     rcsc::Formation::Ptr M_normal_formation;
     rcsc::Formation::Ptr M_defense_formation;
@@ -202,6 +223,11 @@ public:
 
     bool isMarkerType( const int unum ) const;
 
+    // Per-player defensive threshold (adapted from Cyrus isDefenseSituation)
+    // Returns true if THIS player should adopt a defensive posture based on
+    // their role and the current ball position — independent of team situation.
+    bool isPersonalDefenseSituation( const rcsc::WorldModel & wm,
+                                      int unum ) const;
 
     SoccerRole::Ptr createRole( const int unum,
                                 const rcsc::WorldModel & wm ) const;
@@ -213,6 +239,9 @@ private:
     void updateSituation( const rcsc::WorldModel & wm );
     // update the current position table
     void updatePosition( const rcsc::WorldModel & wm );
+    // dynamic formation shifts applied on top of base formation (F523 style)
+    void applyDynamicFormationShifts( const rcsc::WorldModel & wm,
+                                       const rcsc::Vector2D & ball_pos );
 
     rcsc::Formation::Ptr createFormation( const std::string & filepath );
 

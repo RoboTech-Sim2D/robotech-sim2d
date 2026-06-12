@@ -88,6 +88,11 @@ sample_player_SOURCES = \
 	bhv_basic_move.cpp \
 	bhv_basic_tackle.cpp \
 	bhv_mark_opponent.cpp \
+	bhv_defensive_move.cpp \
+	bhv_mark_execute.cpp \
+	bhv_mark_decision_greedy.cpp \
+	best_match_finder.cpp \
+	mark_position_finder.cpp \
 	bhv_unmark.cpp \
 	bhv_custom_before_kick_off.cpp \
 	bhv_goalie_basic_move.cpp \
@@ -227,6 +232,12 @@ noinst_HEADERS = \
 	bhv_basic_move.h \
 	bhv_basic_tackle.h \
 	bhv_mark_opponent.h \
+	bhv_defensive_move.h \
+	bhv_mark_execute.h \
+	bhv_mark_decision_greedy.h \
+	best_match_finder.h \
+	mark_position_finder.h \
+	mark_types.h \
 	bhv_unmark.h \
 	bhv_custom_before_kick_off.h \
 	bhv_goalie_basic_move.h \

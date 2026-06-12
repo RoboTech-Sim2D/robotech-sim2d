@@ -264,6 +264,9 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
    // opponents offside. Target = defense line + small buffer ahead.
    if ( ( role >= 2 && role <= 5 )
         && ( wm.kickableTeammate() || wm.ball().pos().x > 0.0 )
+        // Sprint a máxima potencia: no ejecutarlo rozando el umbral de daño
+        // permanente de recovery (2400+600)
+        && wm.self().stamina() > ServerParam::i().recoverDecThrValue() + 600.0
         && wm.ball().pos().x > -25.0
         && me.x < wm.ourDefenseLineX() - 2.0 )
    {
@@ -288,15 +291,6 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
        }
    }
 
-    if (std::min(self_min, mate_min) < opp_min){
-        if (Bhv_Unmark().execute(agent))
-            return true;
-    }
-    const double dash_power = Strategy::get_normal_dash_power( wm );
-
-    double dist_thr = wm.ball().distFromSelf() * 0.1;
-    if ( dist_thr < 1.0 ) dist_thr = 1.0;
-
     // ── Forward Run: offensive halves support attack ──────────────────────────
     // When a teammate has the ball in the opponent half and we are an offensive
     // half (role 7 or 8), sprint into the box to create a 3rd/4th attacker option.
@@ -305,16 +299,29 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     // Forward run: fires when we have/are winning the ball in opponent half.
     // Condition: kickableTeammate OR we're winning the ball race (our team reaches it
     // within 3 steps of the opponent). This keeps P7/P8 advanced even between passes.
+    // NOTE: must run BEFORE Bhv_Unmark — its trigger overlaps with the unmark
+    // trigger, and the unmark returns early, which used to cancel this run.
     bool our_team_has_initiative = wm.kickableTeammate()
                                    || std::min( self_min, mate_min ) <= opp_min + 3;
+    bool forward_run_active = false;
     if ( our_team_has_initiative
          && ( role == 7 || role == 8 )
+         // Carrera de lujo: con poca stamina, mantener formación. Sin gate,
+         // P7/P8 acababan el partido sin recovery y la alineación se rompía.
+         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.5
          && wm.ball().pos().x > 5.0
          && me.x < wm.offsideLineX() - 1.0 )
     {
         double run_x = std::min( wm.ball().pos().x + 12.0, wm.offsideLineX() - 1.5 );
         run_x = std::max( run_x, 20.0 );  // mantener posición avanzada mínima
         double run_y = ( role == 7 ) ? -8.0 : 8.0;
+        // Carril dinámico: si el balón está en mi carril, corto al half-space
+        // central — abre la banda para el lateral y arrastra al marcador.
+        if ( wm.ball().pos().y * run_y > 0.0
+             && std::fabs( wm.ball().pos().y ) > 8.0 )
+        {
+            run_y *= 0.4;
+        }
         run_y = std::max( -28.0, std::min( 28.0, run_y ) );
 
         Vector2D run_target( run_x, run_y );
@@ -322,12 +329,23 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
         if ( run_target.x > me.x + 2.0 )
         {
             target_point = run_target;
+            forward_run_active = true;
             dlog.addText( Logger::TEAM,
                           __FILE__": forward run → (%.1f, %.1f)",
                           run_target.x, run_target.y );
             agent->debugClient().addMessage( "FwdRun" );
         }
     }
+
+    if ( ! forward_run_active
+         && std::min(self_min, mate_min) < opp_min ){
+        if (Bhv_Unmark().execute(agent))
+            return true;
+    }
+    const double dash_power = Strategy::get_normal_dash_power( wm );
+
+    double dist_thr = wm.ball().distFromSelf() * 0.1;
+    if ( dist_thr < 1.0 ) dist_thr = 1.0;
 
     // ── 3-Ring Unmarking (Cyrus 2022 TDP) ──
     // When a teammate has the ball and we are an offensive player,
@@ -340,6 +358,7 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     // (to drag defenders and create space for others).
     if ( wm.kickableTeammate()
          && role >= 6
+         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.45
          && wm.ball().pos().x > -25.0
          && wm.self().pos().x < wm.offsideLineX() + 2.0 )
     {
@@ -366,19 +385,27 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                 // Must be forward relative to ball (through-pass territory)
                 if ( candidate.x < wm.ball().pos().x - 3.0 ) continue;
 
-                // How many cycles for me to reach this point
+                // How many cycles for me to reach this point (accel-aware)
                 double my_dist = wm.self().pos().dist( candidate );
-                double my_cycles = my_dist / wm.self().playerType().realSpeedMax();
+                double my_cycles = wm.self().playerType().cyclesToReachDistance( my_dist );
 
                 // Check nearest opponent distance to candidate
                 double min_opp_dist = 1000.0;
+                const PlayerObject * nearest_opp_to_cand = nullptr;
                 for ( const PlayerObject * opp : wm.opponents() )
                 {
                     if ( ! opp || opp->isGhost() ) continue;
                     double od = opp->pos().dist( candidate );
-                    if ( od < min_opp_dist ) min_opp_dist = od;
+                    if ( od < min_opp_dist )
+                    {
+                        min_opp_dist = od;
+                        nearest_opp_to_cand = opp;
+                    }
                 }
-                double opp_cycles = min_opp_dist / 1.0;  // ~max opp speed
+                double opp_cycles = ( nearest_opp_to_cand
+                                      && nearest_opp_to_cand->playerTypePtr() )
+                    ? nearest_opp_to_cand->playerTypePtr()->cyclesToReachDistance( min_opp_dist )
+                    : min_opp_dist;
 
                 // I must reach before opponent (with margin)
                 if ( my_cycles > opp_cycles - 1.0 ) continue;
@@ -413,6 +440,11 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                           target_point.x, target_point.y );
         }
     }
+
+    // Prioridad entre los bloques defensivos que compiten por target_point
+    // (roles 2-5): marca coordinada(1) < through-cover(2) < ball-interceptor(3).
+    // Antes ganaba el último bloque en orden de código, no el más urgente.
+    int def_priority = 0;
 
     // ── Coordinated Play-On Marking (Hungarian-style deterministic) ──────────
     // Same principle as set-play marking: sort threats by danger, sort
@@ -502,8 +534,8 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                 blended.x = ball_predict.x - 2.0;
 
             target_point = blended;
+            def_priority = 1;
 
-            agent->setArmAction( new Arm_PointToPoint( opp_pos ) );
             dlog.addText( Logger::TEAM,
                           __FILE__": coordinated mark opp%d (rank%d) → (%.1f, %.1f)",
                           assigned->unum(), my_rank,
@@ -582,10 +614,84 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                 if ( i_am_nearest && my_dist > 2.0 )
                 {
                     target_point = intercept_pt;
+                    def_priority = 3;
                     dlog.addText( Logger::TEAM,
                                   __FILE__": ball-interceptor → (%.1f, %.1f) dist=%.1f",
                                   intercept_pt.x, intercept_pt.y, my_dist );
                 }
+            }
+        }
+    }
+
+    // ── Through-pass coverage: drop behind the defensive line ────────────
+    // Inspired by Cyrus getThMarkTarget: when an opponent is positioned
+    // at or behind our defensive line (deep run), route the nearest
+    // unoccupied defender to cover the through-pass lane.
+    if ( role >= 2 && role <= 5
+         && def_priority < 2
+         && ! wm.kickableTeammate()
+         && wm.ball().pos().x < 10.0 )
+    {
+        const double pitch_half  = ServerParam::i().pitchHalfLength();
+        const Vector2D our_goal( -pitch_half, 0.0 );
+
+        // Compute average defensive line X (players 2-5)
+        double def_line_x = 0.0;
+        int    def_count  = 0;
+        for ( int i = 2; i <= 5; i++ )
+        {
+            const AbstractPlayerObject * tm = wm.ourPlayer( i );
+            if ( tm && tm->unum() > 0 ) { def_line_x += tm->pos().x; def_count++; }
+        }
+        if ( def_count > 0 ) def_line_x /= def_count;
+
+        // Find opponent with a dangerous deep-run position
+        const PlayerObject * through_threat = nullptr;
+        double best_score = -1.0e9;
+
+        for ( const PlayerObject * opp : wm.opponents() )
+        {
+            if ( !opp || opp->isGhost() || opp->goalie() ) continue;
+            if ( opp->pos().x > def_line_x + 2.0 )   continue;  // not behind line
+            if ( opp->pos().x < -pitch_half + 5.0 )   continue;  // already contained
+            if ( opp->pos().x > 5.0 )                  continue;
+
+            // Score: prefer rivals closest to goal, penalize very wide positions
+            double score = -opp->pos().dist( our_goal )
+                           - opp->pos().absY() * 0.15;
+            if ( score > best_score ) { best_score = score; through_threat = opp; }
+        }
+
+        if ( through_threat )
+        {
+            // Cover position: 1.5m behind the threat on the goal side,
+            // slightly compressed toward center to cover shooting angle
+            Vector2D cover_pos(
+                std::max( through_threat->pos().x - 1.5, def_line_x - 1.0 ),
+                through_threat->pos().y * 0.8 );
+
+            double my_dist = me.dist( cover_pos );
+            bool   i_am_nearest = true;
+
+            for ( const PlayerObject * tm : wm.teammates() )
+            {
+                if ( !tm || tm->goalie() ) continue;
+                const int tm_role = Strategy::i().roleNumber( tm->unum() );
+                if ( tm_role < 2 || tm_role > 5 ) continue;
+                if ( tm->unum() == wm.self().unum() ) continue;
+                if ( tm->posCount() > 5 ) continue;
+                if ( tm->pos().dist( cover_pos ) < my_dist - 1.5 )
+                { i_am_nearest = false; break; }
+            }
+
+            if ( i_am_nearest && my_dist > 1.5 )
+            {
+                target_point = cover_pos;
+                def_priority = 2;
+                dlog.addText( Logger::TEAM,
+                              __FILE__": through-cover opp=%d → (%.1f, %.1f)",
+                              through_threat->unum(),
+                              cover_pos.x, cover_pos.y );
             }
         }
     }

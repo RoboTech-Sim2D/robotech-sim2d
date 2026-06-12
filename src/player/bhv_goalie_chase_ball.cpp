@@ -270,14 +270,22 @@ Bhv_GoalieChaseBall::doGoToCatchPoint( PlayerAgent * agent,
         agent->debugClient().addMessage( "GoToCatch:Back" );
         agent->doDash( dash_power );
     }
-    // forward dash turn
+    // forward bipedal dash + turn simultaneously (v19)
+    // positive rel_angle = target to the left = right leg stronger
     else if ( rel_angle.abs() < 90.0 )
     {
+        double forward_power = std::min( wm.self().stamina() + wm.self().playerType().extraStamina(),
+                                         SP.maxDashPower() ) * 0.8;
+        double turn_factor = rel_angle.degree() / 90.0; // [-1, +1]
+        double left_power  = forward_power * ( 1.0 - turn_factor * 0.5 );
+        double right_power = forward_power * ( 1.0 + turn_factor * 0.5 );
+        left_power  = std::max( SP.minDashPower(), std::min( SP.maxDashPower(), left_power  ) );
+        right_power = std::max( SP.minDashPower(), std::min( SP.maxDashPower(), right_power ) );
         dlog.addText( Logger::TEAM,
-                      __FILE__": turn %.1f for forward dash",
-                      rel_angle.degree() );
-        agent->debugClient().addMessage( "GoToCatch:F-Turn" );
-        agent->doTurn( rel_angle );
+                      __FILE__": bipedal dash turn=%.1f l=%.1f r=%.1f",
+                      rel_angle.degree(), left_power, right_power );
+        agent->debugClient().addMessage( "GoToCatch:BipedalF" );
+        agent->doBipedalDash( left_power, 0.0, right_power, 0.0 );
     }
     else
     {
@@ -306,10 +314,14 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
     static int s_chase_until_cycle = -1;
     const int current_cycle = wm.time().cycle();
 
-    //if ( wm.gameMode().type() != GameMode::PlayOn )
-    //{
-    //    return false;
-    //}
+    // Balón muerto (set plays, saques de meta): el portero nunca persigue.
+    // Con este guard comentado, en nuestro goal kick el portero corría al
+    // balón y se apilaba con el pateador designado por Bhv_SetPlay::is_kicker
+    // (que excluye al portero de candidatos), dejando su zona libre.
+    if ( wm.gameMode().type() != GameMode::PlayOn )
+    {
+        return false;
+    }
 
     const ServerParam & SP = ServerParam::i();
 
@@ -375,13 +387,14 @@ Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
 
     ////////////////////////////////////////////////////////////////////////
     // SWEEPER-KEEPER: balón libre rodando hacia portería, portero sale a interceptar
+    // Límite estricto: solo sale si la intercepción es dentro o muy cerca del área
     if ( ! wm.kickableOpponent()
          && ! wm.kickableTeammate()
-         && wm.ball().vel().x < -0.4          // balón moviéndose hacia nuestra portería
-         && wm.ball().pos().x < 0.0           // balón en nuestra mitad
-         && self_min <= opp_min + 2           // portero llega igual o antes que rival
-         && my_int_pos.x < SP.ourPenaltyAreaLineX() + 8.0  // intercepción no muy lejos del área
-         && my_int_pos.absY() < SP.penaltyAreaHalfWidth() + 3.0 )
+         && wm.ball().vel().x < -0.6          // velocidad hacia portería significativa
+         && wm.ball().pos().x < SP.ourPenaltyAreaLineX() + 5.0  // balón cerca del área
+         && self_min <= opp_min + 1           // portero llega antes o igual que rival
+         && my_int_pos.x < SP.ourPenaltyAreaLineX() + 2.0  // intercepción dentro/cerca del área
+         && my_int_pos.absY() < SP.penaltyAreaHalfWidth() + 1.0 )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": sweeper-keeper: salgo a interceptar balon libre" );

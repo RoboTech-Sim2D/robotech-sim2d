@@ -150,8 +150,10 @@ static double dnn_evaluate( const PredictState & state, const WorldModel & wm )
     s_field_eval_dnn->Calculate(input);
     double score = s_field_eval_dnn->mOutput(0, 0);  // sigmoid output [0, 1]
 
-    // Scale to meaningful range: 0.5 neutral, >0.5 favorable
-    return (score - 0.5) * 4.0;  // maps [0,1] → [-2, +2]
+    // Scale to meaningful range: 0.5 neutral, >0.5 favorable.
+    // ±30 compite con los bonuses de zona (~6-12) y el término Voronoi (≤40)
+    // sin tapar el shoot bonus (~90k). Con ±2 el modelo era decorativo.
+    return (score - 0.5) * 60.0;  // maps [0,1] → [-30, +30]
 #else
     (void)state; (void)wm;
     return 0.0;
@@ -249,7 +251,13 @@ SampleFieldEvaluator::operator()(const PredictState &state,
                     result += zone_mult * direction_mult
                               * std::min( forward_gain / 10.0, 2.0 );
                 }
-                // Backward/lateral passes: no bonus — discourage safe recycling
+                else if ( forward_gain < -3.0 )
+                {
+                    // Retroceso real: malus pequeño escalado por zona.
+                    // Lateral (|dx| <= 3) sigue sin bonus ni malus.
+                    result -= std::min( -forward_gain / 10.0, 1.5 )
+                              * zone_mult * 0.5;
+                }
             }
             else if ( asp.action().category() == CooperativeAction::Dribble )
             {
@@ -295,15 +303,16 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
     }
 
     // RoboCIn 2024 §2: Strongly penalize any action chain that ends with
-    // the opponent gaining possession. Fixed -500 regardless of ball position
-    // discourages risky passes and unsuccessful dribbles.
+    // the opponent gaining possession. Zone-scaled: losing the ball at x=40
+    // is far less dangerous than at x=-30, and a flat penalty made risky
+    // vertical passes always lose against safe lateral recycling.
     if ( holder->side() != state.ourSide() )
     {
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::ACTION_CHAIN,
                       "(eval) XXX opponent gains possession" );
 #endif
-        return -500.0;
+        return -500.0 + std::max( 0.0, state.ball().pos().x ) * 4.0;
     }
 
     const int holder_unum = holder->unum();
@@ -428,12 +437,21 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
 
 			    double max_dist = -1000.0;
 
+                            // En zona media exigir progresión: los huecos de Voronoi
+                            // laterales/atrasados alimentaban la circulación sin profundidad.
+                            double min_vertex_x = state.ball().pos().x - 5.0;
+                            if ( state.ball().pos().x > -10.0
+                                 && state.ball().pos().x < 25.0 )
+                            {
+                                min_vertex_x = state.ball().pos().x + 2.0;
+                            }
+
                             for ( VoronoiDiagram::Vector2DCont::const_iterator p = vd.vertices().begin(),
                                       end = vd.vertices().end();
                                           p != end;
                                           ++p )
                             {
-						if ( (*p).x < state.ball().pos().x - 5.0 || (*p).x > 52.5 || fabs((*p).y) > 34.0 )
+						if ( (*p).x < min_vertex_x || (*p).x > 52.5 || fabs((*p).y) > 34.0 )
 							continue;
 
 						if ( ( (*p) - state.ball().pos() ).length() > 34.0 )

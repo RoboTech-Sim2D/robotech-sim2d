@@ -62,7 +62,9 @@
 
 using namespace rcsc;
 
-const size_t ActionChainGraph::DEFAULT_MAX_CHAIN_LENGTH = 4;
+// 6 permite combinaciones P7→P11→P9→tiro que con 4 se truncaban.
+// El coste queda acotado por MAX_EVALUATE_LIMIT (500 nodos), no por la profundidad.
+const size_t ActionChainGraph::DEFAULT_MAX_CHAIN_LENGTH = 6;
 const size_t ActionChainGraph::DEFAULT_MAX_EVALUATE_LIMIT = 500;
 
 std::vector< std::pair< Vector2D, double > > ActionChainGraph::S_evaluated_points;

@@ -228,6 +228,11 @@ SampleCommunication::execute( PlayerAgent * agent )
 #if 1
     sayBallAndPlayers( agent );
     sayStamina( agent );
+    // Difundir líneas: reduce desincronización del offside trap y de la
+    // línea defensiva entre world models (las funciones ya existían sin llamarse;
+    // ambas auto-limitan por presupuesto de say y frescura de la percepción).
+    sayOffsideLine( agent );
+    sayDefenseLine( agent );
 #else
     sayBall( agent );
     sayGoalie( agent );

@@ -237,25 +237,44 @@ def process_log_file(filepath):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python3 extract_from_logs.py <logs_dir> <output_dir>")
-        print("  logs_dir:   directory containing .rcg or .rcg.gz files")
-        print("  output_dir: directory to write CSV output")
+        print("Usage: python3 extract_from_logs.py <logs_dir> <output_dir> [exclude_dir1 exclude_dir2 ...]")
+        print("  logs_dir:    directory containing .rcg or .rcg.gz files")
+        print("  output_dir:  directory to write CSV output")
+        print("  exclude_dirN: subdirectory names to skip (e.g. LOGS_ANTES_300526)")
+        print()
+        print("Example:")
+        print("  python3 extract_from_logs.py /home/robotechtecnl/ data/ LOGS_ANTES_300526 Descargas")
         sys.exit(1)
 
     logs_dir = sys.argv[1]
     output_dir = sys.argv[2]
+    # Any extra arguments are directory names to exclude from the walk
+    excluded_dirs = set(sys.argv[3:]) if len(sys.argv) > 3 else set()
+    if excluded_dirs:
+        print(f"Excluding subdirectories: {excluded_dirs}")
+
     os.makedirs(output_dir, exist_ok=True)
 
     # Find all RCG files (skip files with "null" in name — formation tests without opponent)
     rcg_files = []
     skipped = 0
+    skipped_dirs = 0
     for root, dirs, files in os.walk(logs_dir):
+        # Prune excluded directories so os.walk won't descend into them.
+        # dirs[:] = ... modifies the list in-place, which is what os.walk requires.
+        before = len(dirs)
+        dirs[:] = [d for d in dirs if d not in excluded_dirs]
+        skipped_dirs += before - len(dirs)
+
         for f in files:
             if f.endswith('.rcg') or f.endswith('.rcg.gz'):
                 if 'null' in f.lower():
                     skipped += 1
                     continue
                 rcg_files.append(os.path.join(root, f))
+
+    if skipped_dirs:
+        print(f"Skipped {skipped_dirs} excluded subdirectorie(s)")
 
     if not rcg_files:
         print(f"No .rcg files found in {logs_dir} (skipped {skipped} null matches)")
