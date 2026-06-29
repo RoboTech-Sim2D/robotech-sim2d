@@ -45,6 +45,7 @@
 #include "bhv_goalie_basic_move.h"
 
 #include "bhv_basic_tackle.h"
+#include "bhv_goalie_chase_ball.h"
 #include "neck_goalie_turn_neck.h"
 
 #include "basic_actions/basic_actions.h"
@@ -61,7 +62,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 
 using namespace rcsc;
 
@@ -125,17 +125,27 @@ Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
                     dlog.addText( Logger::TEAM,
                                   __FILE__": SAVE → (%.1f %.1f) cross_y=%.2f",
                                   block_pt.x, block_pt.y, cross_y );
-                    std::cerr << "[GK] SAVE fired t=" << wm.time().cycle()
-                              << " block=(" << block_pt.x << "," << block_pt.y << ")"
-                              << " cross_y=" << cross_y << std::endl;
                     agent->debugClient().addMessage( "GK_Save" );
                     agent->debugClient().setTarget( block_pt );
 
-                    if ( ! Body_GoToPoint( block_pt, 0.3, SP.maxDashPower() ).execute( agent ) )
+                    // PUNTO-BLANCO (port Cyrus isGoal→tackle): si el tiro entrante
+                    // ya está al alcance del tackle, LANZARSE. Un tackle tiene
+                    // alcance y es INSTANTÁNEO → desvía un disparo a quemarropa al
+                    // que jamás llegaríamos corriendo (causa de "no va por el
+                    // balón"). Umbral bajo (0.3): si va a ser gol igual, lanzarse
+                    // siempre es mejor que quedarse quieto. Gateado a "tiro al
+                    // arco" (estamos dentro del bloque de atajada) → seguro.
+                    if ( Bhv_BasicTackle( 0.3, 90.0 ).execute( agent ) )
                     {
-                        Body_TurnToBall().execute( agent );
+                        agent->debugClient().addMessage( "GK_Lunge" );
+                        return true;
                     }
-                    agent->setNeckAction( new Neck_TurnToBall() );
+
+                    // Si el balón aún no está al alcance del tackle: alcance
+                    // LATERAL (dash/bipedal/back-dash, sin girar primero) al punto
+                    // de cruce sobre la línea — llega al poste lejano más rápido
+                    // que Body_GoToPoint. Pone el cuello al balón.
+                    Bhv_GoalieChaseBall::doGoToCatchPoint( agent, block_pt );
                     return true;
                 }
             }
@@ -164,22 +174,26 @@ Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
         return true;
     }
 
-    // Ya en posición: orientar el cuerpo listo para reaccionar.
-    //   - Balón central → mirar al balón (estable; antes giraba ±90° cada ciclo
-    //     al cruzar y=0 y se veía errático).
-    //   - Balón claramente lateral → ponerse de costado para los dashes
-    //     laterales rápidos hacia ese lado.
+    // Ya en posición: orientar SIEMPRE DE COSTADO (±90°). El portero debe poder
+    // dashear lateralmente AL INSTANTE cuando llegue el tiro; si encara el balón
+    // con el cuerpo, ante el disparo tiene que GIRAR primero y pierde el
+    // desplazamiento (visto en log: el GK giraba —Turn+1/ciclo— en vez de seguir
+    // el balón —Dash casi sin cambiar— y le entraban por el lado). El cuello
+    // (Neck_GoalieTurnNeck) ve el balón INDEPENDIENTEMENTE del cuerpo, así que de
+    // costado NO perdemos visión. Histéresis ±0.5 cerca del centro para no girar
+    // 180° si el balón cruza y=0.
     {
         const Vector2D ball_next = wm.ball().pos() + wm.ball().vel();
+        const double cur_body = wm.self().body().degree();
         AngleDeg body_angle;
-        if ( std::fabs( ball_next.y ) < 3.5 )
-        {
-            body_angle = ( wm.ball().pos() - wm.self().pos() ).th();
-        }
+        if ( ball_next.y < -0.5 )
+            body_angle = -90.0;
+        else if ( ball_next.y > 0.5 )
+            body_angle = 90.0;
         else
-        {
-            body_angle = ( ball_next.y < 0.0 ? -90.0 : 90.0 );
-        }
+            // centro muerto: mantener el costado actual (no girar 180°).
+            body_angle = ( std::fabs( cur_body + 90.0 ) < std::fabs( cur_body - 90.0 )
+                           ? -90.0 : 90.0 );
         Body_TurnToAngle( body_angle ).execute( agent );
         agent->setNeckAction( new Neck_GoalieTurnNeck() );
     }
@@ -225,18 +239,19 @@ Bhv_GoalieBasicMove::getTargetPoint( PlayerAgent * agent )
         base_move_x = goal_x + 2.2 + t * 2.8;          // hasta ≈ -47.5
     }
 
-    // ACHIQUE 1v1: si el rival CONTROLA el balón en zona de tiro, SALIR más hacia
-    // él para cerrar el ángulo del arco de 14m. Esto acerca AMBOS postes (incluido
-    // el LEJANO, que es lo que nos seguía costando goles): cuanto más adelantado,
-    // menos hueco al poste contrario. En 2D no hay globos, así que adelantarse es
-    // seguro; el portero se repliega solo cuando el rival pierde el control.
+    // ACHIQUE 1v1 (CONSERVADOR): salir a achicar el ángulo SOLO ante una amenaza
+    // CERCANA, y SIN pasarse de la línea. En el log se vio que salir 9m con el
+    // balón a 11-14m dejaba al GK VARADO: el rival le pasaba/cruzaba el balón por
+    // el lado y entraba al arco vacío. Ahora: solo si el balón está a ≤12m de la
+    // portería, factor menor y tope a ≈5m de la línea (puede seguir reaccionando
+    // con un dash lateral a cualquiera de los dos postes).
     if ( wm.gameMode().type() == GameMode::PlayOn
          && wm.kickableOpponent()
-         && ball_pos.x < -22.0
-         && ball_pos.absY() < 16.0 )
+         && ball_pos.x < goal_x + 12.0          // amenaza CERCA (≤12m), no a media cancha
+         && ball_pos.absY() < 12.0 )
     {
-        const double adv = goal_x + 2.2 + ( ball_pos.x - goal_x ) * 0.40;
-        base_move_x = std::max( base_move_x, std::min( adv, goal_x + 9.0 ) );  // tope ≈ -43.5
+        const double adv = goal_x + 2.2 + ( ball_pos.x - goal_x ) * 0.25;
+        base_move_x = std::max( base_move_x, std::min( adv, goal_x + 5.0 ) );  // tope ≈ -47.5
         agent->debugClient().addMessage( "GK_Narrow" );
     }
 

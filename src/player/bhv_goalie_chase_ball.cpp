@@ -270,22 +270,21 @@ Bhv_GoalieChaseBall::doGoToCatchPoint( PlayerAgent * agent,
         agent->debugClient().addMessage( "GoToCatch:Back" );
         agent->doDash( dash_power );
     }
-    // forward bipedal dash + turn simultaneously (v19)
-    // positive rel_angle = target to the left = right leg stronger
+    // forward/diagonal: dash OMNIDIRECCIONAL hacia el punto (dirección rel_angle),
+    // sin girar primero. PORTABLE: el bipedal dash (doBipedalDash) es de
+    // rcssserver v19 y solo está en nuestra librcsc parcheada (~/rc/tools); una
+    // librcsc v18 estándar (la de otros integrantes) no lo tiene y no compilaba.
+    // doDash(power, dir) sí está en librcsc v18 y logra lo mismo: avanzar hacia
+    // el punto en diagonal en un solo ciclo.
     else if ( rel_angle.abs() < 90.0 )
     {
-        double forward_power = std::min( wm.self().stamina() + wm.self().playerType().extraStamina(),
-                                         SP.maxDashPower() ) * 0.8;
-        double turn_factor = rel_angle.degree() / 90.0; // [-1, +1]
-        double left_power  = forward_power * ( 1.0 - turn_factor * 0.5 );
-        double right_power = forward_power * ( 1.0 + turn_factor * 0.5 );
-        left_power  = std::max( SP.minDashPower(), std::min( SP.maxDashPower(), left_power  ) );
-        right_power = std::max( SP.minDashPower(), std::min( SP.maxDashPower(), right_power ) );
+        const double power = std::min( wm.self().stamina() + wm.self().playerType().extraStamina(),
+                                       SP.maxDashPower() );
         dlog.addText( Logger::TEAM,
-                      __FILE__": bipedal dash turn=%.1f l=%.1f r=%.1f",
-                      rel_angle.degree(), left_power, right_power );
-        agent->debugClient().addMessage( "GoToCatch:BipedalF" );
-        agent->doBipedalDash( left_power, 0.0, right_power, 0.0 );
+                      __FILE__": omni dash dir=%.1f power=%.1f",
+                      rel_angle.degree(), power );
+        agent->debugClient().addMessage( "GoToCatch:OmniF" );
+        agent->doDash( power, rel_angle );
     }
     else
     {
