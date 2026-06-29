@@ -202,10 +202,22 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                                   && self_min < opp_min + pressing
                                   && self_min < 20 );
 
+    // Desempate determinista de la carrera al balón: con self_min == mate_min
+    // ambos jugadores iban al balón y se lo quitaban entre ellos ("van 2 a
+    // controlar"). En empate va el de unum menor (vs el compañero más rápido
+    // según la intercept table); el otro mantiene posición/desmarque.
+    bool i_win_race = ( self_min < mate_min );
+    if ( ! i_win_race && self_min == mate_min )
+    {
+        const AbstractPlayerObject * ft = wm.interceptTable().firstTeammate();
+        i_win_race = ( ! ft || ft->unum() < 1
+                       || wm.self().unum() < ft->unum() );
+    }
+
     if ( ! wm.kickableTeammate()
-         && ( self_min <= 3
+         && ( ( self_min <= 3 && i_win_race )
               || defender_deep_press
-              || ( self_min <= mate_min
+              || ( i_win_race
                    && self_min < opp_min + pressing ) // pressing
               )
          )
@@ -308,7 +320,9 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
          && ( role == 7 || role == 8 )
          // Carrera de lujo: con poca stamina, mantener formación. Sin gate,
          // P7/P8 acababan el partido sin recovery y la alineación se rompía.
-         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.5
+         // 45%: por encima del suelo de conservación (~37%) para que las
+         // carreras sigan activas en juego normal.
+         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.45
          && wm.ball().pos().x > 5.0
          && me.x < wm.offsideLineX() - 1.0 )
     {
@@ -335,6 +349,32 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                           run_target.x, run_target.y );
             agent->debugClient().addMessage( "FwdRun" );
         }
+    }
+
+    // ── CenterForward (P11) ancla central ─────────────────────────────────────
+    // Datos (logs vs SRBIAU2D): 144 toques en el área rival, 0 centrales, 0 goles.
+    // El delantero centro jugaba a y=-12 (wide), sin nadie en el punto de penalti
+    // para rematar centros/cutbacks. Lo anclamos al área central cuando atacamos,
+    // SALTANDO el unmark (que premia espacio abierto = ir wide). El 3-ring de abajo
+    // aún refina, pero su penalización de centralidad lo mantiene en |y|<8.
+    if ( ! forward_run_active
+         && role == 11
+         && our_team_has_initiative
+         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.40
+         && wm.ball().pos().x > 0.0
+         && me.x < wm.offsideLineX() - 0.5 )
+    {
+        double anchor_x = std::min( wm.ball().pos().x + 10.0, wm.offsideLineX() - 1.0 );
+        anchor_x = std::max( anchor_x, 25.0 );
+        // y central con leve sesgo al lado del balón (para el cutback), tope ±6
+        double anchor_y = std::max( -6.0, std::min( 6.0, wm.ball().pos().y * 0.15 ) );
+
+        target_point = Vector2D( anchor_x, anchor_y );
+        forward_run_active = true;  // saltar Bhv_Unmark (premia ir wide)
+        dlog.addText( Logger::TEAM,
+                      __FILE__": P11 central anchor → (%.1f, %.1f)",
+                      anchor_x, anchor_y );
+        agent->debugClient().addMessage( "CFAnchor" );
     }
 
     if ( ! forward_run_active
@@ -760,9 +800,12 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     // area. YuShan identified this as a critical gap: midfielders stay in their
     // offensive positions while the rival already enters the penalty area.
     // HELIOS defends with a single compact line — we replicate that here.
+    // Replegarse solo si el rival gana CLARAMENTE la carrera al balón.
+    // Antes (opp_min < our+3) los medios se replegaban incluso ganando
+    // nosotros la carrera por 2 ciclos — equipo cohibido en transición.
     if ( role >= 6 && role <= 8
          && ! wm.kickableTeammate()
-         && opp_min < std::min( self_min, mate_min ) + 3
+         && opp_min + 2 < std::min( self_min, mate_min )
          && wm.ball().pos().x < -10.0 )
     {
         // Target x: sit 5-8m behind the ball, but never deeper than -38

@@ -400,13 +400,20 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
 
     double point = state.ball().pos().x * weight;
 
-    // Non-linear bonus for proximity to opponent goal (Z3 — offensive zone).
-    // Linear x doesn't capture that x=40 is MUCH more dangerous than x=20.
-    // Extra bonus grows quadratically in the last 20m.
+    // Non-linear bonus for proximity to opponent goal (Z3 — offensive zone),
+    // ESCALADO POR CENTRALIDAD. Antes dependía solo de X → un balón en (50,-27)
+    // (esquina muerta) valía IGUAL que en (50,0) (punto de penalti), así que el
+    // ataque derivaba a las bandas/esquina (P9/P7 camponeaban el córner, 0 toques
+    // centrales en el área, 0 goles). Un balón hondo pero abierto es casi un
+    // callejón sin salida: lo descontamos por |y|.
     if ( state.ball().pos().x > 15.0 )
     {
         double approach = state.ball().pos().x - 15.0;  // 0..37.5
-        point += approach * approach * 0.08;             // up to +112 at goal line
+        const double aby = state.ball().pos().absY();
+        const double central_factor = ( aby < 10.0 )
+            ? 1.0
+            : std::max( 0.25, 1.0 - ( aby - 10.0 ) / 30.0 );  // |y|=10→1.0, 25→0.5, 40→0.25
+        point += approach * approach * 0.08 * central_factor;  // centro ~4× la esquina
     }
 
         Vector2D best_point = ServerParam::i().theirTeamGoalPos();

@@ -62,10 +62,18 @@
 
 using namespace rcsc;
 
-// 6 permite combinaciones P7→P11→P9→tiro que con 4 se truncaban.
-// El coste queda acotado por MAX_EVALUATE_LIMIT (500 nodos), no por la profundidad.
+// 6 permite combinaciones P7→P11→P9→tiro que con 4 se truncaban (ataque más
+// profundo). Se probó bajar a 4 por rendimiento pero el equipo perdió ataque y
+// pasó de empatar/ganar a perder → revertido a 6. El coste queda acotado por
+// MAX_EVALUATE_LIMIT (500 nodos), que es el verdadero techo de cómputo.
 const size_t ActionChainGraph::DEFAULT_MAX_CHAIN_LENGTH = 6;
-const size_t ActionChainGraph::DEFAULT_MAX_EVALUATE_LIMIT = 500;
+// Bajado de 500 a 250 por el profiling (2026-06-21): el promedio por ciclo era
+// rápido (1-4ms) pero había PICOS de 50-170ms cuando la búsqueda tocaba el tope
+// de 500 evaluaciones (heurística+Voronoi+DNN por nodo) en balón disputado, y
+// esos picos hacían PERDER la acción (lost kick/dash al decidir el pase → balón
+// perdido). 250 acota el peor caso a ~la mitad (<50ms) sin tocar el promedio, la
+// profundidad de cadena (6) ni el DNN. Subir a 300-350 si el ataque se nota recortado.
+const size_t ActionChainGraph::DEFAULT_MAX_EVALUATE_LIMIT = 250;
 
 std::vector< std::pair< Vector2D, double > > ActionChainGraph::S_evaluated_points;
 

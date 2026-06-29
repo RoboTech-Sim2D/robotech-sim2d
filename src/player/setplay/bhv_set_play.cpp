@@ -626,7 +626,15 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
             for ( const PlayerObject * tm : wm.teammates() )
             {
                 if ( ! tm || tm->goalie() ) continue;
-                if ( tm->pos().dist( cover_point ) < my_d - 1.0 )
+                const double d = tm->pos().dist( cover_point );
+                // Cede si el compañero está claramente más cerca; en zona de
+                // empate (±0.5m) desempata el unum menor. El margen anterior
+                // (ir salvo que alguien estuviera 1m MÁS cerca) hacía que
+                // 3-4 jugadores se creyeran asignados y se apilaran.
+                if ( d < my_d - 0.5
+                     || ( std::fabs( d - my_d ) <= 0.5
+                          && tm->unum() > 0
+                          && tm->unum() < wm.self().unum() ) )
                 {
                     i_am_nearest = false;
                     break;
@@ -696,6 +704,7 @@ Bhv_SetPlay::doBasicTheirSetPlayMove( PlayerAgent * agent )
             for ( const PlayerObject * tm : wm.teammates() )
             {
                 if ( ! tm || tm->goalie() ) continue;
+                if ( tm->unum() < 1 ) continue;  // compañero no reconocido (unum=-1): sin él no se puede asignar marca
                 const Vector2D tm_home = Strategy::i().getPosition( tm->unum() );
                 double hy = tm_home.isValid() ? tm_home.y : tm->pos().y;
                 marker_hy_unum.emplace_back( hy, tm->unum() );

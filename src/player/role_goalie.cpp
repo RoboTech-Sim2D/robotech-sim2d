@@ -20,6 +20,7 @@
 #include <rcsc/player/player_agent.h>
 #include <rcsc/player/debug_client.h>
 #include <rcsc/player/world_model.h>
+#include <rcsc/player/intercept_table.h>
 
 #include <rcsc/common/logger.h>
 #include <rcsc/common/server_param.h>
@@ -83,6 +84,8 @@ RoleGoalie::execute( PlayerAgent * agent )
     if ( wm.time().cycle()
          > wm.self().catchTime().cycle() + SP.catchBanCycle()
          && wm.ball().distFromSelf() < SP.catchableArea() - 0.05
+         // El balón debe estar ENFRENTE (Cyrus): no se puede atrapar de espaldas.
+         && ( ( wm.ball().pos() - wm.self().pos() ).th() - wm.self().body() ).abs() < 90.0
          && our_penalty.contains( wm.ball().pos() ) )
     {
         agent->doCatch();
@@ -113,17 +116,16 @@ RoleGoalie::doKick( PlayerAgent * agent )
 void
 RoleGoalie::doMove( PlayerAgent * agent )
 {
-    GameMode::Type gm = agent->world().gameMode().type();
-    std::cerr << "[DBG RoleGoalie::doMove] gm(enum)=" << gm << std::endl;
+    const bool chase = Bhv_GoalieChaseBall::is_ball_chase_situation( agent );
 
-    if ( Bhv_GoalieChaseBall::is_ball_chase_situation( agent ) )
+    if ( chase )
     {
-        std::cerr << "  -> chaseBall" << std::endl;
+        dlog.addText( Logger::TEAM, __FILE__": doMove -> chaseBall" );
         Bhv_GoalieChaseBall().execute( agent );
     }
     else
     {
-        std::cerr << "  -> basicMove" << std::endl;
+        dlog.addText( Logger::TEAM, __FILE__": doMove -> basicMove" );
         Bhv_GoalieBasicMove().execute( agent );
     }
 }

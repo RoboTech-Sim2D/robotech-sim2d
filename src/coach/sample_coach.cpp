@@ -395,15 +395,23 @@ SampleCoach::doFirstSubstitute()
     // goalie is always assigned to the default type so far.
     //
 
+    int gk_type = Hetero_Default;
     if ( config().version() >= 14.0 )
     {
-        substituteTo( 1, Hetero_Default ); // goalie
+        // Portero = tipo MÁS RÁPIDO (antes se le forzaba el default → lento). El
+        // portero no necesita stamina ni pegada; lo único que importa es
+        // reaccionar y desplazarse rápido para llegar a los tiros. Era la causa
+        // principal de "se mueve lento / no reacciona".
+        gk_type = getFastestType( candidates );
+        if ( gk_type == Hetero_Unknown ) gk_type = Hetero_Default;
+        substituteTo( 1, gk_type ); // goalie
     }
     {
+        // quitar el tipo del portero de los candidatos (que no lo reusen los de campo)
         PlayerTypePtrCont::iterator it = candidates.begin();
         for ( ; it != candidates.end(); ++it )
         {
-            if ( (*it)->id() == Hetero_Default )
+            if ( (*it)->id() == gk_type )
             {
                 break;
             }

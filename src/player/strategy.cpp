@@ -657,7 +657,11 @@ Strategy::updateSituation( const WorldModel & wm )
     }
 
     // Hysteresis: if already defending, stay until we clearly win ball (3-cycle gap)
-    if ( M_current_situation == Defense_Situation && our_min < opp_min + 3 )
+    // BUG corregido: la condición estaba invertida (our_min < opp_min + 3 es
+    // cierta sobre todo CON posesión nuestra) → el equipo quedaba atrapado en
+    // formación defensiva mientras atacaba. Permanecer en Defense solo
+    // mientras NO tengamos ventaja clara de 3+ ciclos al balón.
+    if ( M_current_situation == Defense_Situation && our_min > opp_min - 3 )
     {
         dlog.addText( Logger::TEAM,
                       __FILE__": Situation Defense (hysteresis, our_min=%d opp_min=%d)",

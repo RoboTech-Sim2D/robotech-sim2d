@@ -308,170 +308,84 @@ bool
 Bhv_GoalieChaseBall::is_ball_chase_situation( const PlayerAgent  * agent )
 {
     const WorldModel & wm = agent->world();
+    const ServerParam & SP = ServerParam::i();
 
-    // Hysteresis: once committed to chasing, hold for 3 cycles
-    // Prevents per-cycle flip-flop when conditions are borderline
-    static int s_chase_until_cycle = -1;
-    const int current_cycle = wm.time().cycle();
-
-    // Balón muerto (set plays, saques de meta): el portero nunca persigue.
-    // Con este guard comentado, en nuestro goal kick el portero corría al
-    // balón y se apilaba con el pateador designado por Bhv_SetPlay::is_kicker
-    // (que excluye al portero de candidatos), dejando su zona libre.
+    // Balón muerto (saques, faltas): el portero NUNCA persigue (si no, se apila
+    // con el pateador designado en nuestros saques de meta).
     if ( wm.gameMode().type() != GameMode::PlayOn )
     {
         return false;
     }
 
-    const ServerParam & SP = ServerParam::i();
+    const int self_min = wm.interceptTable().selfStep();
+    const int opp_min  = wm.interceptTable().opponentStep();
+    const int mate_min = wm.interceptTable().teammateStep();
 
-    int self_min = wm.interceptTable().selfStep();
-    int opp_min = wm.interceptTable().opponentStep();
+    const Vector2D self_min_pos = wm.ball().inertiaPoint( self_min );
 
-    ////////////////////////////////////////////////////////////////////////
-    // ball is in very dangerous area
-    const Vector2D ball_next_pos = wm.ball().pos() + wm.ball().vel();
-    if ( ball_next_pos.x < -SP.pitchHalfLength() + 15.0
-         && ball_next_pos.absY() < SP.goalHalfWidth() + 5.0 )
+    const double goal_x = -SP.pitchHalfLength();
+
+    // ── 1) TIRO hacia la portería (Cyrus) ────────────────────────────────────
+    //    Sale a cortarlo SOLO si lo intercepta antes de la línea, antes que el
+    //    rival, y sin quitárselo a un compañero que llega antes.
+    if ( is_ball_shoot_moving( agent ) )
     {
-        // exist kickable teammate
-        // avoid back pass
-        if ( wm.kickableTeammate() )
+        if ( self_min_pos.x > goal_x + 0.5 )   // lo alcanzo dentro del campo
         {
-            dlog.addText( Logger::TEAM,
-                          __FILE__": danger area. exist kickable teammate?" );
-            return false;
+            const bool in_pa = ( self_min_pos.x < SP.ourPenaltyAreaLineX()
+                                 && self_min_pos.absY() < SP.penaltyAreaHalfWidth() );
+            if ( self_min < opp_min + ( in_pa ? 1 : 0 )
+                 && self_min <= mate_min + 1 )
+            {
+                dlog.addText( Logger::TEAM, __FILE__": shoot — corto antes de gol/rival" );
+                return true;
+            }
         }
-        else if ( wm.ball().distFromSelf() < 3.0
-                  && self_min <= 3 )
-        {
-            dlog.addText( Logger::TEAM,
-                          __FILE__": danger area. ball is very near." );
-            s_chase_until_cycle = current_cycle + 3;
-            return true;
-        }
-        else if ( self_min > opp_min + 3
-                  && opp_min < 7
-                  && wm.ball().vel().x > -0.3 )
-        {
-            // Opponent faster AND ball is NOT moving toward goal — don't rush out
-            dlog.addText( Logger::TEAM,
-                          __FILE__": danger area. opponent faster and ball not toward goal" );
-            return false;
-        }
-        else
-        {
-            // Ball heading toward goal OR we can contest — always chase
-            dlog.addText( Logger::TEAM,
-                          __FILE__": danger area. chase ball" );
-            s_chase_until_cycle = current_cycle + 3;
-            return true;
-        }
+        // No lo intercepto LIMPIO antes de la línea → NO salir (ChaseBall no
+        // ataja bien): dejar que la ATAJADA (shot-block en Bhv_GoalieBasicMove)
+        // se lance a cubrir el cruce sobre la línea.
+        dlog.addText( Logger::TEAM, __FILE__": shoot — no lo alcanzo limpio, lo cubre la atajada" );
+        return false;
     }
 
-    ////////////////////////////////////////////////////////////////////////
-    // check shoot moving
-    if ( is_ball_shoot_moving( agent )
-         && self_min < opp_min )
+    // ── 2) Compañero controlando → no salir (evita backpass / robarle) ────────
+    if ( wm.kickableTeammate() && ! wm.kickableOpponent() )
+    {
+        return false;
+    }
+
+    // ── 3) LIBERTAD CONTROLADA: el portero solo sale para balones en la zona
+    //    CENTRAL y CERCANA (≈ área pequeña). Fuera de ahí NO sale: se queda
+    //    cubriendo el arco. Así no persigue balones pegados a la banda (que no
+    //    puede atrapar) ni queda vendido al centro atrás — el gol que encajábamos.
+    const double zone_x = goal_x + SP.goalAreaLength() + 4.0;   // ≈ -43
+    const double zone_y = SP.goalHalfWidth() + 5.0;             // ≈ 8.66 (ancho área chica)
+    if ( self_min_pos.x > zone_x
+         || self_min_pos.absY() > zone_y )
     {
         dlog.addText( Logger::TEAM,
-                      __FILE__": shoot moving. chase ball" );
-        s_chase_until_cycle = current_cycle + 3;
+                      __FILE__": intercepción fuera de zona central/cercana — no salir" );
+        return false;
+    }
+
+    // ── 4) Dentro de la zona: salir solo si gana la carrera con claridad ──────
+    if ( wm.ball().distFromSelf() < 3.0 && self_min <= 3 )
+    {
+        dlog.addText( Logger::TEAM, __FILE__": balón muy cerca — salir" );
         return true;
     }
-
-    ////////////////////////////////////////////////////////////////////////
-    // get active interception catch point
-
-    const Vector2D my_int_pos = wm.ball().inertiaPoint( wm.interceptTable().selfStep() );
-
-    ////////////////////////////////////////////////////////////////////////
-    // SWEEPER-KEEPER: balón libre rodando hacia portería, portero sale a interceptar
-    // Límite estricto: solo sale si la intercepción es dentro o muy cerca del área
-    if ( ! wm.kickableOpponent()
-         && ! wm.kickableTeammate()
-         && wm.ball().vel().x < -0.6          // velocidad hacia portería significativa
-         && wm.ball().pos().x < SP.ourPenaltyAreaLineX() + 5.0  // balón cerca del área
-         && self_min <= opp_min + 1           // portero llega antes o igual que rival
-         && my_int_pos.x < SP.ourPenaltyAreaLineX() + 2.0  // intercepción dentro/cerca del área
-         && my_int_pos.absY() < SP.penaltyAreaHalfWidth() + 1.0 )
+    if ( opp_min <= self_min - 1 )       // el rival llega antes
     {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": sweeper-keeper: salgo a interceptar balon libre" );
-        s_chase_until_cycle = current_cycle + 3;
-        return true;
-    }
-
-    double pen_thr = wm.ball().distFromSelf() * 0.1 + 1.0;
-    if ( pen_thr < 1.0 ) pen_thr = 1.0;
-    // GK can only catch within penalty area width — intercept outside is unreachable
-    if ( my_int_pos.absY() > SP.penaltyAreaHalfWidth() - pen_thr
-         || my_int_pos.x > SP.ourPenaltyAreaLineX() - pen_thr )
-    {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": intercept point is out of penalty (y=%.1f thr=%.1f)",
-                      my_int_pos.absY(), SP.penaltyAreaHalfWidth() - pen_thr );
+        dlog.addText( Logger::TEAM, __FILE__": rival más rápido — no salir" );
         return false;
     }
-
-    ////////////////////////////////////////////////////////////////////////
-    // NUEVO: No perseguir si el balón se está alejando de la portería
-    // Solo bloquear chase si balón se aleja Y está fuera del área peligrosa
-    if ( wm.ball().vel().x > 0.3
-         && wm.ball().pos().x > SP.ourPenaltyAreaLineX() )
+    if ( mate_min < self_min - 1 )       // un compañero llega claramente antes
     {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": ball is moving away from goal. vel.x=%.2f don't chase",
-                      wm.ball().vel().x );
+        dlog.addText( Logger::TEAM, __FILE__": compañero más rápido — no salir" );
         return false;
     }
-
-    ////////////////////////////////////////////////////////////////////////
-    // Now, I can chase the ball
-    // check the ball possessor
-
-    if ( wm.kickableTeammate()
-         && ! wm.kickableOpponent() )
-    {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": exist kickable player" );
-        s_chase_until_cycle = -1;  // break commitment on teammate possession
-        return false;
-    }
-
-    // Maintain committed chase for N cycles — prevents oscillation on borderline conditions
-    if ( current_cycle <= s_chase_until_cycle )
-    {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": hysteresis: maintaining chase commitment until cycle %d",
-                      s_chase_until_cycle );
-        return true;
-    }
-
-    if ( opp_min <= self_min - 2 )
-    {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": opponent reach the ball faster than me" );
-        return false;
-    }
-
-    const double my_dist_to_catch = wm.self().pos().dist( my_int_pos );
-
-    double opp_min_dist = 10000.0;
-    wm.getOpponentNearestTo( my_int_pos, 30, &opp_min_dist );
-
-    if ( opp_min_dist < my_dist_to_catch - 2.0 )
-    {
-        dlog.addText( Logger::TEAM,
-                      __FILE__": opponent is nearer than me. my_dist=%.2f  opp_dist=%.2f",
-                      my_dist_to_catch, opp_min_dist );
-        return false;
-    }
-
-    dlog.addText( Logger::TEAM,
-                  __FILE__": exist interception point. try chase." );
-    s_chase_until_cycle = current_cycle + 3;  // commit for 3 cycles
-    return true;
+    dlog.addText( Logger::TEAM, __FILE__": gano la carrera en zona — salir" );
+    return ( self_min <= opp_min );
 }
 
 /*-------------------------------------------------------------------*/
