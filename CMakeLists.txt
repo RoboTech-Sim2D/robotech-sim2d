@@ -59,9 +59,12 @@ endif()
 add_definitions(-DHAVE_CONFIG_H)
 
 # Enable DNN field evaluator (trained from match logs)
-# CppDNN is header-only, uses Eigen3 (already linked via librcsc)
+# CppDNN is header-only, uses Eigen3 (already linked via librcsc).
+# Vendored in third_party/CppDNN so the build is self-contained and
+# reproducible (the previous ../../tools path pointed outside the repo
+# and broke rebuilds when that directory was removed).
 add_definitions(-DHAVE_CPPDNN)
-include_directories(${PROJECT_SOURCE_DIR}/../../tools)
+include_directories(${PROJECT_SOURCE_DIR}/third_party)
 configure_file(
   ${PROJECT_SOURCE_DIR}/cmake-config.h.in
   ${PROJECT_BINARY_DIR}/config.h
