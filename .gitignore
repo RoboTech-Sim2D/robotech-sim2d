@@ -88,6 +88,14 @@ src/trainer/sample_trainer
 # Tar archives
 *.tar.gz
 
+# A/B test output dirs (match logs/scores, regenerated on each run)
+/ab_results/
+/ab_results_vs_opp/
+
+# Timestamped backup binaries (removed from tracking; keep untracked/local)
+src/player/sample_player.old-*
+src/coach/sample_coach.old-*
+
 # Pre-built deployment directory
 src/robotech/
 

@@ -1237,7 +1237,7 @@ Strategy::getFormation( const WorldModel & wm ) const
         // Resetear fase de taunt cuando el juego se reanuda.
         if ( M_taunt_phase != -1 )
         {
-             std::cerr << "[DEBUG Strategy] Resetting taunt phase (Game Resumed)" << std::endl;
+             // std::cerr << "[DEBUG Strategy] Resetting taunt phase (Game Resumed)" << std::endl;
              M_taunt_phase = -1;
         }
 
@@ -1405,7 +1405,7 @@ Strategy::getFormation( const WorldModel & wm ) const
             // Al combinar esto con la lógica "sticky" y el reset corregido, debería funcionar.
             if ( wm.gameMode().side() == wm.ourSide() )
             {
-                std::cerr << "[DEBUG AfterGoal] ANOTAMOS! Iniciando secuencia de taunts (ourSide)" << std::endl;
+                // std::cerr << "[DEBUG AfterGoal] ANOTAMOS! Iniciando secuencia de taunts (ourSide)" << std::endl;
                 M_taunt_counter = 0;
                 M_taunt_phase = 0;
                 continue_taunt = true;
@@ -1424,8 +1424,8 @@ Strategy::getFormation( const WorldModel & wm ) const
             M_taunt_counter++;
             int elapsed_cycles = M_taunt_counter;
             
-            std::cerr << "[DEBUG AfterGoal] Taunt Status: Phase=" << M_taunt_phase 
-                      << " Counter=" << M_taunt_counter << std::endl;
+            // std::cerr << "[DEBUG AfterGoal] Taunt Status: Phase=" << M_taunt_phase
+            //           << " Counter=" << M_taunt_counter << std::endl;
 
             // Fase 0: Mostrar "R" (0-30 ciclos = 0-3 segundos)
             if ( elapsed_cycles < 15 )
@@ -1434,22 +1434,16 @@ Strategy::getFormation( const WorldModel & wm ) const
                 // Usar formación específica para cada lado.
                 // LEFT=-1, RIGHT=1.
                 // Si somos RIGHT (1), usamos la formación RIGHT (que tiene Y invertida para compensar rotación).
-                std::cerr << "[DEBUG AfterGoal] Fase 0: Mostrar 'R'. My SideID=" << (int)wm.ourSide() 
-                          << " LEFT=" << (int)rcsc::LEFT << " RIGHT=" << (int)rcsc::RIGHT << std::endl;
+                // std::cerr << "[DEBUG AfterGoal] Fase 0: Mostrar 'R'. My SideID=" << (int)wm.ourSide()
+                //           << " LEFT=" << (int)rcsc::LEFT << " RIGHT=" << (int)rcsc::RIGHT << std::endl;
                 if ( wm.ourSide() == rcsc::LEFT )
                 {
-                    std::cerr << "[DEBUG AfterGoal] Returning R LEFT formation First Section" << std::endl;
+                    // std::cerr << "[DEBUG AfterGoal] Returning R LEFT formation" << std::endl;
                     return M_after_goal_formation;
                 }
                 else
                 {
-                    std::cerr << "[DEBUG AfterGoal] Returning R RIGHT formation Second Section test" << std::endl;
-                    if ( M_after_goal_r_right_formation )
-                    {
-                        
-                        rcsc::Vector2D p11 = M_after_goal_r_right_formation->getPosition(11, wm.ball().pos());
-                         return M_after_goal_r_right_formation;
-                    }
+                    // std::cerr << "[DEBUG AfterGoal] Returning R RIGHT formation" << std::endl;
                     return M_after_goal_r_right_formation;
                 }
             }
@@ -1457,15 +1451,15 @@ Strategy::getFormation( const WorldModel & wm ) const
             else if ( elapsed_cycles < 30 )
             {
                 M_taunt_phase = 1;
-                std::cerr << "[DEBUG AfterGoal] Fase 1: Mostrar 'T'. My SideID=" << (int)wm.ourSide() << std::endl;
+                // std::cerr << "[DEBUG AfterGoal] Fase 1: Mostrar 'T'. My SideID=" << (int)wm.ourSide() << std::endl;
                 if ( wm.ourSide() == rcsc::LEFT )
                 {
-                    std::cerr << "[DEBUG AfterGoal] Returning T LEFT formation" << std::endl;
+                    // std::cerr << "[DEBUG AfterGoal] Returning T LEFT formation" << std::endl;
                     return M_after_goal_t_left_formation;
                 }
                 else
                 {
-                    std::cerr << "[DEBUG AfterGoal] Returning T RIGHT formation" << std::endl;
+                    // std::cerr << "[DEBUG AfterGoal] Returning T RIGHT formation" << std::endl;
                     return M_after_goal_t_right_formation;
                 }
             }
@@ -1473,7 +1467,7 @@ Strategy::getFormation( const WorldModel & wm ) const
             else
             {
                 M_taunt_phase = 2;
-                std::cerr << "[DEBUG AfterGoal] Fase 2: Formación normal" << std::endl;
+                // std::cerr << "[DEBUG AfterGoal] Fase 2: Formación normal" << std::endl;
                 return M_before_kick_off_formation;
             }
         }
