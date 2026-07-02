@@ -240,7 +240,24 @@ SampleFieldEvaluator::operator()(const PredictState &state,
 
             if ( asp.action().category() == CooperativeAction::Pass )
             {
-                if ( forward_gain > 0.0 )
+                // #3 Cutback (pase atrás desde el fondo/banda hacia el área central):
+                // el balón llega al punto de penalti desde una posición honda y
+                // abierta. Es de altísimo valor (remate franco) pero con la regla
+                // vieja caía como "pase hacia atrás" (dx<=0) y se PENALIZABA — una
+                // causa directa del túnel lateral. Lo premiamos fuerte y salteamos
+                // el resto de la lógica direccional. Umbrales: destino en el área
+                // central (x>30, |y|<12) y origen hondo (x>36) o más abierto que
+                // el destino (banda → centro).
+                const bool is_cutback =
+                    dest.x > 30.0 && std::fabs( dest.y ) < 12.0
+                    && ( origin.x > 36.0
+                         || std::fabs( origin.y ) > std::fabs( dest.y ) + 8.0 );
+
+                if ( is_cutback )
+                {
+                    result += 6.0;   // ~ equivalente a un through-pass fuerte en Z3
+                }
+                else if ( forward_gain > 0.0 )
                 {
                     // Forward pass: bonus scales with advancement × zone
                     double angle = std::fabs( std::atan2( dy, dx ) * 180.0 / M_PI );
@@ -490,9 +507,18 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
 						if ( wm.self().pos().x < (*p).x && tmp.length() > 7.0 && our_dist > tmp.length() )
                                                         our_dist = tmp.length();
 
-					if (max_dist < min_dist - our_dist )
+					// #4 Sesgo de centralidad en zona profunda: en x>30 un hueco de
+					// Voronoi pegado a la banda alimenta el "túnel lateral" (centros
+					// muertos). A igualdad de espacio, preferir el hueco más central
+					// (half-space / punto de penalti) restando un término por |y|.
+					// No afecta la zona media (x<=30), donde abrir a banda sí sirve.
+					double vscore = min_dist - our_dist;
+					if ( (*p).x > 30.0 )
+						vscore -= std::max( 0.0, (*p).absY() - 8.0 ) * 0.5;
+
+					if (max_dist < vscore )
 					{
-						max_dist = min_dist - our_dist;
+						max_dist = vscore;
 						best_point = (*p);
 					}
 
