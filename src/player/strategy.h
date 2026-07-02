@@ -95,7 +95,6 @@ public:
     static const std::string SETPLAY_OUR_FORMATION_CONF;
     static const std::string INDIRECT_FREEKICK_OPP_FORMATION_CONF;
     static const std::string INDIRECT_FREEKICK_OUR_FORMATION_CONF;
-    static const std::string AFTER_GOAL_FORMATION_CONF;
     static const std::string AFTER_GOAL_FORMATION_CONF_Left;
     static const std::string AFTER_GOAL_FORMATION_CONF_Right;
     static const std::string AFTER_GOAL_FORMATION_CONF_T_Left;

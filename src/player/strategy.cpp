@@ -89,7 +89,6 @@ const std::string Strategy::SETPLAY_OPP_FORMATION_CONF = "setplay-opp-formation.
 const std::string Strategy::SETPLAY_OUR_FORMATION_CONF = "setplay-our-formation.conf";
 const std::string Strategy::INDIRECT_FREEKICK_OPP_FORMATION_CONF = "indirect-freekick-opp-formation.conf";
 const std::string Strategy::INDIRECT_FREEKICK_OUR_FORMATION_CONF = "indirect-freekick-our-formation.conf";
-const std::string Strategy::AFTER_GOAL_FORMATION_CONF = "Y_L.conf";
 const std::string Strategy::AFTER_GOAL_FORMATION_CONF_Left = "after-goal-formation-r-left.conf";
 const std::string Strategy::AFTER_GOAL_FORMATION_CONF_Right = "after-goal-formation-r-right.conf";
 const std::string Strategy::AFTER_GOAL_FORMATION_CONF_T_Left = "after-goal-formation-t-left.conf";
@@ -238,12 +237,6 @@ Strategy::read( const std::string & formation_dir )
         std::cerr << "before-kick-off-our.conf not found, using before-kick-off.conf"
                   << std::endl;
         M_before_kick_off_our_formation = M_before_kick_off_formation;
-    }
-    M_after_goal_formation = createFormation( configpath + AFTER_GOAL_FORMATION_CONF );  
-    if ( ! M_after_goal_formation )  
-    {  
-        std::cerr << "Failed to read after goal formation" << std::endl;  
-        return false;  
     }
 
     // Cargar formaciones para secuencia de taunts R → T

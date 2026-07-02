@@ -15,6 +15,8 @@
 #include "intention_receive.h"
 #include "planner/field_analyzer.h"
 #include <vector>
+#include <fstream>
+#include <iostream>
 
 #include <rcsc/player/say_message_builder.h>
 #include "basic_actions/basic_actions.h"
@@ -37,6 +39,10 @@ using namespace rcsc;
 // static bool debug = false;
 Bhv_Unmark::UnmarkPosition Bhv_Unmark::last_unmark_position = UnmarkPosition();
 DeepNueralNetwork * Bhv_Unmark::pass_prediction = new DeepNueralNetwork();
+// Guard: el unmark DNN solo se activa si el archivo de pesos existe en el CWD.
+// Sin esto, ReadFromKeras sobre un archivo ausente lanzaba excepción y el player
+// CRASHEABA al primer desmarque (el field_eval sí verifica; este no lo hacía).
+static bool s_unmark_dnn_ok = false;
 
 
 bool Bhv_Unmark::execute(PlayerAgent *agent) {
@@ -479,15 +485,26 @@ bool Bhv_Unmark::run(PlayerAgent *agent, const UnmarkPosition &unmark_position) 
 }
 
 void Bhv_Unmark::load_dnn(){
-    static bool load_dnn = false;
-    if(!load_dnn){
-        load_dnn = true; 
+    static bool attempted = false;
+    if(!attempted){
+        attempted = true;
+        // Verificar que el archivo exista ANTES de leerlo: si falta, ReadFromKeras
+        // lee líneas vacías -> stod("")/substr(npos) -> excepción no capturada ->
+        // crash. Sin pesos, el desmarque cae al modo no-DNN (fallback seguro).
+        std::ifstream test("./unmark_dnn_weights.txt");
+        if ( ! test.good() ){
+            std::cerr << "[UnmarkDNN] ./unmark_dnn_weights.txt no encontrado — desmarque DNN desactivado" << std::endl;
+            return;
+        }
+        test.close();
         pass_prediction->ReadFromKeras("./unmark_dnn_weights.txt");
+        s_unmark_dnn_ok = true;
     }
 }
 
 vector<pass_prob> Bhv_Unmark::predict_pass_dnn(vector<double> & features, vector<int> ignored_player, int kicker){
     load_dnn();
+    if ( ! s_unmark_dnn_ok ) return {};   // sin pesos -> sin predicción DNN (fallback seguro)
     MatrixXd input(290,1); // 290 12
     for (int i = 1; i <= 290; i += 1){
         input(i - 1,0) = features[i];
