@@ -14,6 +14,7 @@
 
 #include "strategy.h"
 #include "bhv_mark_execute.h"
+#include "bhv_basic_block.h"
 
 #include "basic_actions/body_go_to_point.h"
 #include "basic_actions/body_turn_to_point.h"
@@ -54,6 +55,19 @@ bool Bhv_DefensiveMove::execute( rcsc::PlayerAgent * agent )
 {
     const WorldModel & wm = agent->world();
     const int opp_min = wm.interceptTable().opponentStep();
+
+    // ── PRESS/INTERCEPT before marking (ROOT-CAUSE FIX del 59% de carreras) ──
+    // Cyrus corre Body_InterceptPlan ANTES del split defensa/ataque: el jugador
+    // más rápido SIEMPRE disputa el balón. Nosotros saltábamos directo a marcar
+    // aquí y NUNCA íbamos por el balón → llegábamos segundos / defensa pasiva.
+    // Bhv_BasicBlock ya encapsula: "más rápido del equipo → Body_Intercept; si
+    // no, bloqueador designado → tapa el carril; si no → return false". Correrlo
+    // primero hace que EXACTAMENTE UN defensa presione el balón y el resto caiga
+    // al marcaje. Es autolimitante (no genera racimo).
+    if ( Bhv_BasicBlock().execute( agent ) ) {
+        agent->debugClient().addMessage( "DefPress" );
+        return true;
+    }
 
     if ( wm.interceptTable().firstOpponent() == nullptr
       || wm.interceptTable().firstOpponent()->unum() < 1 ) {

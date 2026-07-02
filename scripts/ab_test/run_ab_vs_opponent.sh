@@ -37,6 +37,12 @@ OPP_CMD="${1:?Pass the opponent start command as arg 1 (quoted)}"
 N="${2:-10}"
 HALF="${3:-300}"
 
+# Real-time toggle. Por defecto SYNCH=true = modo síncrono, corre tan rápido como
+# respondan los agentes (~25x, partido completo en ~30-90 s). Con REALTIME=1 (o
+# SYNCH=false) el server corre a reloj de pared (~10 min/partido completo): útil
+# para VER el partido en el monitor y dar a los agentes los 100 ms/ciclo enteros.
+if [ "${REALTIME:-0}" = "1" ]; then SYNCH=false; else SYNCH="${SYNCH:-true}"; fi
+
 # --- locate our repo relative to this script (scripts/ab_test/ -> repo root) ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -59,6 +65,11 @@ echo "REPO=$REPO"
 echo "SERVER=$SRV ($($SRV --version 2>/dev/null | head -1))"
 echo "OPPONENT=$OPP_CMD"
 echo "N=$N per condition, half=$HALF s"
+if [ "$SYNCH" = "false" ]; then
+  echo "MODE=REAL-TIME (synch_mode=false, ~10 min/partido completo)"
+else
+  echo "MODE=FAST (synch_mode=true, ~30-90 s/partido)"
+fi
 echo ""
 
 run_condition() {   # $1 = ON|OFF ; $2 = our run dir ; $3 = our team name
@@ -69,12 +80,12 @@ run_condition() {   # $1 = ON|OFF ; $2 = our run dir ; $3 = our team name
     pkill -f sample_player 2>/dev/null; pkill -f sample_coach 2>/dev/null; pkill -f rcssserver 2>/dev/null
     sleep 1
     local name="${tag}_m${i}"
-    "$SRV" server::auto_mode=true server::synch_mode=true \
+    "$SRV" server::auto_mode=true server::synch_mode=$SYNCH \
         server::half_time=$HALF server::nr_normal_halfs=2 server::nr_extra_halfs=0 \
         server::penalty_shoot_outs=false \
         server::game_logging=true server::text_logging=false \
-        server::game_log_dir="$WORK/logs" server::game_log_fixed=true \
-        server::game_log_fixed_name="$name" server::game_log_compression=0 \
+        server::game_log_dir="'$WORK/logs'" server::game_log_fixed=true \
+        server::game_log_fixed_name="'$name'" server::game_log_compression=0 \
         > "$WORK/logs/${name}.out" 2>&1 &
     local srvpid=$!
     sleep 2
@@ -85,7 +96,10 @@ run_condition() {   # $1 = ON|OFF ; $2 = our run dir ; $3 = our team name
       ( eval "$OPP_CMD -h localhost -p 6000" >/dev/null 2>&1 ); sleep 1
       ( cd "$rundir" && "$BIN/start.sh" -h localhost -p 6000 -t "$myname" >/dev/null 2>&1 )
     fi
-    for s in $(seq 1 300); do kill -0 $srvpid 2>/dev/null || break; sleep 1; done
+    # espera a que el server termine solo (auto_mode). Cap generoso: rompe en
+    # cuanto el partido acaba, así que un tope alto no cuesta y evita cortar
+    # partidos largos (half=300 -> ~2x300 s sim) a media = marcador corrupto.
+    for s in $(seq 1 900); do kill -0 $srvpid 2>/dev/null || break; sleep 1; done
     kill $srvpid 2>/dev/null; pkill -f sample_player 2>/dev/null; pkill -f sample_coach 2>/dev/null
 
     local out="$WORK/logs/${name}.out"
