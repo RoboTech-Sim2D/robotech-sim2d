@@ -205,8 +205,19 @@ ShootGenerator::createShoot( const WorldModel & wm,
 {
     const AngleDeg ball_move_angle = ( target_point - M_first_ball_pos ).th();
 
+    // #2 Fast-path de remate en el área: a quemarropa (<16 m del arco, ~límite
+    // del área) NO abortamos el curso por tener visión "vieja" del portero o no
+    // haber mirado exactamente la dirección de tiro. Dentro del área, intentar
+    // el remate aunque el cuello no esté perfecto supera a reciclar el balón —
+    // era una causa directa de "dudar para rematar". El guard sigue vigente en
+    // tiros de fuera del área, donde apuntar mal sí desperdicia la posesión.
+    const bool point_blank =
+        ( M_first_ball_pos.dist2( ServerParam::i().theirTeamGoalPos() )
+          < std::pow( 16.0, 2 ) );
+
     const AbstractPlayerObject * goalie = wm.getTheirGoalie();
-    if ( goalie
+    if ( ! point_blank
+         && goalie
          && 5 < goalie->posCount()
          && goalie->posCount() < 30
          && wm.dirCount( ball_move_angle ) > 3 )

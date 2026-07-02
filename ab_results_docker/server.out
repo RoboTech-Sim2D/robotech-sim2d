@@ -1,0 +1,87 @@
+rcssserver-19.0.0
+
+Copyright (C) 1995, 1996, 1997, 1998, 1999 Electrotechnical Laboratory.
+2000 - RoboCup Soccer Simulator Maintenance Group.
+
+Simulator Random Seed: 1783005423
+CSVSaver: Ready
+STDOutSaver: Ready
+Using simulator's random seed as Hetero Player Seed: 1783005423
+wind factor: rand: 0.000000, vector: (0.000000, 0.000000)
+
+Hit CTRL-C to exit
+Waiting for players to connect
+A new (v18) player (RoboTech 1) connected.
+A new (v19) player (HELIOS2025 1) connected.
+A new (v19) player (HELIOS2025 2) connected.
+A new (v19) player (HELIOS2025 3) connected.
+A new (v18) player (RoboTech 2) connected.
+A new (v18) player (RoboTech 3) connected.
+A new (v18) player (RoboTech 4) connected.
+A new (v18) player (RoboTech 5) connected.
+A new (v18) player (RoboTech 6) connected.
+A new (v18) player (RoboTech 7) connected.
+A new (v18) player (RoboTech 8) connected.
+A new (v18) player (RoboTech 9) connected.
+A new (v18) player (RoboTech 10) connected.
+A new (v18) player (RoboTech 11) connected.
+A new (v18) online coach (RoboTech) connected.
+A new (v19) player (HELIOS2025 4) connected.
+A new (v19) player (HELIOS2025 5) connected.
+A new (v19) player (HELIOS2025 6) connected.
+A new (v19) player (HELIOS2025 7) connected.
+A new (v19) player (HELIOS2025 8) connected.
+A new (v19) player (HELIOS2025 9) connected.
+A new (v19) player (HELIOS2025 10) connected.
+A new (v19) player (HELIOS2025 11) connected.
+Waiting to kick off
+A new (v19) online coach (HELIOS2025) connected.
+Kick_off_left
+Waiting to kick off
+Kick_off_right
+Waiting after end of match
+remoteclient.cpp: 149: Error sending to socket: Bad file descriptor
+msg = [(think)]
+remoteclient.cpp: 149: Error sending to socket: Bad file descriptor
+msg = [(think)]
+A player disconnected : (HELIOS2025 10)
+A player disconnected : (HELIOS2025 3)
+A player disconnected : (HELIOS2025 1)
+A player disconnected : (HELIOS2025 6)
+A player disconnected : (RoboTech 4)
+A player disconnected : (HELIOS2025 8)
+A player disconnected : (HELIOS2025 2)
+A player disconnected : (RoboTech 10)
+A player disconnected : (HELIOS2025 9)
+A player disconnected : (HELIOS2025 4)
+A player disconnected : (RoboTech 8)
+A player disconnected : (HELIOS2025 7)
+A player disconnected : (RoboTech 2)
+A player disconnected : (HELIOS2025 11)
+A player disconnected : (RoboTech 1)
+A player disconnected : (HELIOS2025 5)
+An online coach disconnected : (RoboTech Coach_base)
+An online coach disconnected : (HELIOS2025)
+A player disconnected : (RoboTech 5)
+A player disconnected : (RoboTech 11)
+A player disconnected : (RoboTech 3)
+A player disconnected : (RoboTech 9)
+A player disconnected : (RoboTech 7)
+A player disconnected : (RoboTech 6)
+
+Game Over. Exiting...
+
+Saving Results:
+	CSVSaver: saving...
+	CSVSaver: ...disabled
+	STDOutSaver: saving...
+
+Game Results:
+	2026-07-02 15:17:03
+	'RoboTech' vs 'HELIOS2025'
+	Left Coach: 'Coach_base'
+	Score: 0 - 9
+ 
+	STDOutSaver: ...saved
+
+Saving Results Complete
