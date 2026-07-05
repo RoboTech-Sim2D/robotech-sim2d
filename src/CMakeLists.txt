@@ -50,9 +50,13 @@ file(COPY
 add_custom_target(sync_runtime_data ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${PROJECT_SOURCE_DIR}/src/formations-dt ${PROJECT_BINARY_DIR}/bin/formations-dt
+  # field_eval_weights.txt EXCLUIDO a propósito (2026-07-05): el A/B N=30 midió
+  # −0.8 GA/partido con el field_eval DNN apagado y la entrega va OFF — el sync
+  # lo estaba RESUCITANDO en build/bin en cada make. src/ lo conserva solo para
+  # el track de reentrenamiento; para reactivarlo, copiarlo a bin/ a mano.
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          ${PROJECT_SOURCE_DIR}/src/field_eval_weights.txt
           ${PROJECT_SOURCE_DIR}/src/unmark_dnn_weights.txt
+          ${PROJECT_SOURCE_DIR}/src/helios_golie_origin
           ${PROJECT_BINARY_DIR}/bin/
   COMMENT "Sincronizando formations-dt y pesos DNN a bin/"
   )

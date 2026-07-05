@@ -28,6 +28,11 @@
 #define BHV_BASIC_TACKLE_H
 
 #include <rcsc/player/soccer_action.h>
+#include <rcsc/geom/vector_2d.h>
+
+namespace rcsc {
+class WorldModel;
+}
 
 class Bhv_BasicTackle
     : public rcsc::SoccerBehavior {
@@ -36,12 +41,18 @@ private:
     const double M_body_thr;
 public:
     Bhv_BasicTackle( const double & min_prob,
-                     const double & body_thr )
+                     const double & body_thr = 90.0 )
         : M_min_probability( min_prob )
         , M_body_thr( body_thr )
       { }
 
     bool execute( rcsc::PlayerAgent * agent );
+
+    // Port Cyrus (2026-07-05, para el portero migrado): umbral de tackle
+    // DINÁMICO según el peligro real del estado (balón entrando a nuestro
+    // arco → 0.1; despeje comprometido → 0.3-0.4; juego normal → 0.8-0.9).
+    static double calc_takle_prob( const rcsc::WorldModel & wm,
+                                   rcsc::Vector2D bp = rcsc::Vector2D::INVALIDATED );
 
 private:
 

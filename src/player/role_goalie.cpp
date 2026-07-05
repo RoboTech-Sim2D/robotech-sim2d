@@ -1,197 +1,261 @@
 // -*-c++-*-
 
+/*
+ *Copyright:
+
+ Copyright (C) Hidehisa AKIYAMA
+
+ This code is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 3, or (at your option)
+ any later version.
+
+ This code is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this code; see the file COPYING.  If not, write to
+ the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+
+ *EndCopyright:
+ */
+
+/////////////////////////////////////////////////////////////////////
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
 
 #include "role_goalie.h"
+#include "bhv_basic_tackle.h"
 
 #include "bhv_goalie_basic_move.h"
 #include "bhv_goalie_chase_ball.h"
 #include "bhv_goalie_free_kick.h"
 
 #include "basic_actions/basic_actions.h"
-#include "basic_actions/body_clear_ball.h"
-#include "basic_actions/body_stop_dash.h"
 #include "basic_actions/neck_scan_field.h"
-#include "basic_actions/body_go_to_point.h"
+#include "basic_actions/body_clear_ball.h"
 #include "basic_actions/body_intercept.h"
-#include "neck_goalie_turn_neck.h"
-
+#include <rcsc/common/audio_memory.h>
 #include <rcsc/player/player_agent.h>
 #include <rcsc/player/debug_client.h>
 #include <rcsc/player/world_model.h>
-#include <rcsc/player/intercept_table.h>
+#include "neck_offensive_intercept_neck.h"
+
+#include "strategy.h"
 
 #include <rcsc/common/logger.h>
 #include <rcsc/common/server_param.h>
-#include <rcsc/common/audio_memory.h>
 #include <rcsc/geom/rect_2d.h>
-
+#include <rcsc/geom/ray_2d.h>
+#include <rcsc/player/intercept_table.h>
+#include "planner/bhv_planned_action.h"
 using namespace rcsc;
 
-const std::string RoleGoalie::NAME( "Goalie" );
+const std::string RoleGoalie::NAME("Goalie");
 
+/*-------------------------------------------------------------------*/
+/*!
+
+ */
 namespace {
-    rcss::RegHolder role = SoccerRole::creators()
-        .autoReg( &RoleGoalie::create, RoleGoalie::name() );
+rcss::RegHolder role = SoccerRole::creators().autoReg(&RoleGoalie::create,
+		RoleGoalie::name());
 }
 
-bool
-RoleGoalie::execute( PlayerAgent * agent )
-{
-    const WorldModel & wm = agent->world();
-    const ServerParam & SP = ServerParam::i();
+/*-------------------------------------------------------------------*/
+/*!
 
-    // ——————— 1. DEFINIMOS HOME Y CENTRO ———————
-    static const Vector2D fieldCenter( 0.0, 0.0 );
-    static const Vector2D goalieHome( -SP.pitchHalfLength() + 1.0, 0.0 );
+ */
+bool RoleGoalie::execute(PlayerAgent * agent) {
+	const WorldModel & wm = agent->world();
 
-    // ——————— 2. SI ES KICKOFF (pelota CENTRADA y PARADA) ———————
-    if ( wm.ball().pos().dist( fieldCenter ) < 0.1
-         && wm.ball().vel().norm() < 0.05
-         && wm.self().pos().dist( goalieHome ) > 0.5 )
-    {
-        // Llévalo a la portería (home). Le pasamos todos los parámetros que pide el constructor:
-        Body_GoToPoint goHome(
-            goalieHome,       // punto destino
-            0.5,              // radio de “llegada”
-            1.0,              // margen para empezar a frenar
-            SP.maxDashPower(),// potencia máxima
-            30,               // ciclos extra para llegar
-            true,             // permitir detenerse
-            0.5,              // ganancia proporcional
-            0.1,              // ganancia integral
-            false             // urgente?
-        );
-        goHome.execute( agent );
+	static const Rect2D our_penalty(Vector2D(-54, -19.98),
+			Vector2D(-36.02, 19.98));
 
-        // siempre girar cuello mientras reposiciona
-        agent->setNeckAction( new Neck_GoalieTurnNeck() );
-        return true;
-    }
+	const PlayerObject::Cont & opps = wm.opponentsFromSelf();
 
-    // ——————— 3. LUEGO VA TU LÓGICA NORMAL ———————
+	const PlayerObject * nearest_opp = (
+			opps.empty() ? static_cast<PlayerObject *>(0) : opps.front());
+	const double nearest_opp_dist = (
+			nearest_opp ? nearest_opp->distFromSelf() : 1000.0);
+	const Vector2D nearest_opp_pos = (
+			nearest_opp ? nearest_opp->pos() : Vector2D(-1000.0, 0.0));
 
-    // Atrapar si es catchable
-    static const Rect2D our_penalty(
-        Vector2D( -SP.pitchHalfLength(),
-                  -SP.penaltyAreaHalfWidth() + 1.0 ),
-        Size2D( SP.penaltyAreaLength() - 1.0,
-                SP.penaltyAreaWidth()  - 2.0 ) );
+	const rcsc::PlayerType * player_type = wm.self().playerTypePtr();
+	float kickableArea = player_type->kickableArea();
 
-    // ——— Regla de BACKPASS (Cyrus): el portero NO puede atrapar legalmente un
-    // balón pateado deliberadamente por un compañero (sería falta → libre
-    // indirecto dentro de nuestra área). Marcamos una ventana de "peligro" y,
-    // dentro de ella, DESPEJAMOS en vez de atrapar. Un disparo rápido que ya
-    // entra a portería sí se ataja (es un tiro real, no un backpass).
-    static bool isDanger = false;
-    static int  dangerCycle = 0;
-    if ( wm.lastKickerSide() == wm.ourSide() )
-    {
-        isDanger = true;
-        dangerCycle = wm.time().cycle();
-    }
+	static bool kicking = false;
+
+	//////////////////////////////////////////////////////////////
+	// play_on play
+
+	static bool isDanger = false;
+	static int dangerCycle = 0;
+
+	rcsc::Vector2D ball = wm.ball().pos();
+	rcsc::Vector2D prevBall = ball + wm.prevBall().rpos();
+	rcsc::Vector2D nextBall = ball + wm.ball().vel();
+
+	if (wm.lastKickerSide() == wm.ourSide()) {
+		isDanger = true;
+		dangerCycle = wm.time().cycle();
+	}
+
     if ( wm.audioMemory().passTime() == wm.time()
-         && ! wm.audioMemory().pass().empty() )
+         && !wm.audioMemory().pass().empty())
     {
         isDanger = true;
         dangerCycle = wm.time().cycle();
     }
-    if ( isDanger )
-    {
-        if ( wm.gameMode().type() != GameMode::PlayOn )       isDanger = false;
-        if ( wm.time().cycle() - dangerCycle > 33
-             && wm.ball().vel().r() > 1.0 )                   isDanger = false;
-        if ( wm.kickableOpponent() || wm.kickableTeammate() ) isDanger = false;
-    }
 
-    if ( wm.time().cycle()
-         > wm.self().catchTime().cycle() + SP.catchBanCycle()
-         && wm.ball().distFromSelf() < SP.catchableArea() - 0.05
-         // El balón debe estar ENFRENTE (Cyrus): no se puede atrapar de espaldas.
-         && ( ( wm.ball().pos() - wm.self().pos() ).th() - wm.self().body() ).abs() < 90.0
-         && our_penalty.contains( wm.ball().pos() ) )
+	if (isDanger) {
+		if (wm.gameMode().type() != rcsc::GameMode::PlayOn)
+			isDanger = false;
+
+		if (wm.time().cycle() - dangerCycle > 33 && wm.ball().vel().r() > 1.0)
+			isDanger = false;
+
+		if (wm.kickableOpponent() || wm.kickableTeammate())
+			isDanger = false;
+	}
+
+	// catchable
+	if (agent->world().time().cycle()
+			> agent->world().self().catchTime().cycle()
+					+ ServerParam::i().catchBanCycle()
+			&& agent->world().ball().distFromSelf()
+					< ServerParam::i().catchableArea() - 0.05
+            && ((wm.ball().pos() - wm.self().pos()).th() - wm.self().body()).abs() < 90
+			&& our_penalty.contains(agent->world().ball().pos())) {
+
+		Vector2D nearestTmmPos = Vector2D(100, 100);
+		if (!wm.teammatesFromSelf().empty()&& wm.teammatesFromSelf().front()!=NULL) {
+			nearestTmmPos = wm.teammatesFromSelf().front()->pos();
+		}
+
+		if (our_penalty.contains(agent->world().ball().pos())
+				&& (nearestTmmPos.dist(wm.ball().pos()) > 2.0
+						|| wm.kickableOpponent()) && !kicking
+				&& (!isDanger
+						|| (wm.ball().vel().r() > 2.6
+								&& agent->world().ball().inertiaPoint(5).x
+										< -52.5))) {
+			kicking = false;
+			isDanger = false;
+            dlog.addText(Logger::TEAM, __FILE__"Want to catch");
+			agent->doCatch();
+			agent->setNeckAction(new Neck_TurnToBall());
+		} else {
+			kicking = true;
+			isDanger = false;
+            dlog.addText(Logger::TEAM, __FILE__"Want to kick");
+			doKick(agent);
+		}
+	} else if (wm.self().isKickable()) {
+		kicking = true;
+		isDanger = false;
+        dlog.addText(Logger::TEAM, __FILE__"is kickable");
+		doKick(agent);
+	} else {
+		kicking = false;
+        dlog.addText(Logger::TEAM, __FILE__"Want to move");
+		doMove(agent);
+	}
+
+	return true;
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+
+ */
+void RoleGoalie::doKick(PlayerAgent * agent) {
+	if (Bhv_PlannedAction().execute(agent)) {
+		dlog.addText(Logger::TEAM,
+		__FILE__": (execute) do chain action");
+		agent->debugClient().addMessage("ChainAction");
+		return;
+	}
+
+	Body_ClearBall().execute(agent);
+	agent->setNeckAction(new Neck_ScanField());
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+
+ */
+void RoleGoalie::doMove(PlayerAgent * agent) {
+
+    const WorldModel & wm = agent->world();
+    auto & iTable = wm.interceptTable();
+
+	int ourReachCycle = std::min(
+            iTable.teammateStep(),
+            iTable.selfStep());
+
+	bool ball_will_be_in_our_goal = false, isGoal = false;
+	const ServerParam & SP = ServerParam::i();
+	const Ray2D ball_ray(agent->world().ball().pos(),
+			agent->world().ball().vel().th());
+	const Line2D goal_line(
+			Vector2D(-SP.pitchHalfLength(), SP.goalHalfWidth() + 2.0),
+			Vector2D(-SP.pitchHalfLength(), -SP.goalHalfWidth() - 2.0));
+	dlog.addLine(Logger::TEAM, ball_ray.origin(),
+			agent->world().ball().inertiaPoint(ourReachCycle), "#ff0000");
+	const Vector2D intersect = ball_ray.intersection(goal_line);
+    if (intersect.isValid() && intersect.absY() < SP.goalHalfWidth() + 2.0
+            && wm.ball().inertiaFinalPoint().x < -SP.pitchHalfLength() + 5) {
+		ball_will_be_in_our_goal = true;
+
+		dlog.addText(Logger::TEAM,
+		__FILE__": ball will be in our goal. intersect=(%.2f %.2f)",
+				intersect.x, intersect.y);
+	}
+    if (ball_will_be_in_our_goal
+            && agent->world().ball().inertiaPoint(ourReachCycle).x < -SP.pitchHalfLength() + 1.0) {
+		dlog.addText(Logger::TEAM,
+		__FILE__": surely ball is goal!!!!");
+		isGoal = true;
+	}
+
+    if (isGoal && (Bhv_BasicTackle(0.4).execute(agent)
+                   || Bhv_BasicTackle(Bhv_BasicTackle::calc_takle_prob(wm)).execute(agent))) {
+		return;
+	}
+
+    int self_cycle = iTable.selfStep();
+    int self_cycle_tackle = iTable.selfStep(); //iTable->selfReachCycleTackle(); oldcyrus
+    int opp_cycle = iTable.opponentStep();
+    int mate_cycle = iTable.teammateStep();
+
+
+    bool action_selected = false;
+    if (Bhv_GoalieChaseBall::is_ball_chase_situation(agent))
     {
-        // ¿tiro real entrando a portería? entonces atajamos aunque estemos en
-        // la ventana de backpass (no es un backpass, es un disparo).
-        const bool real_shot = ( wm.ball().vel().r() > 2.6
-                                 && wm.ball().inertiaPoint( 5 ).x < -SP.pitchHalfLength() );
-        if ( ! isDanger || real_shot )
-        {
-            isDanger = false;
-            agent->doCatch();
-            agent->setNeckAction( new Neck_TurnToBall() );
-        }
-        else
-        {
-            // backpass deliberado: atrapar sería falta → despejar.
-            isDanger = false;
-            dlog.addText( Logger::TEAM, __FILE__": backpass danger → clear instead of catch" );
-            doKick( agent );
-        }
-    }
-    else if ( wm.self().isKickable() )
-    {
-        doKick( agent );
+        action_selected = true;
+        Bhv_GoalieChaseBall().execute(agent);
     }
     else
     {
-        doMove( agent );
-    }
-
-    return true;
-}
-
-
-
-
-void
-RoleGoalie::doKick( PlayerAgent * agent )
-{
-    Body_ClearBall().execute( agent );
-    agent->setNeckAction( new Neck_ScanField() );
-}
-
-void
-RoleGoalie::doMove( PlayerAgent * agent )
-{
-    const WorldModel & wm = agent->world();
-    const ServerParam & SP = ServerParam::i();
-
-    if ( Bhv_GoalieChaseBall::is_ball_chase_situation( agent ) )
-    {
-        dlog.addText( Logger::TEAM, __FILE__": doMove -> chaseBall" );
-        Bhv_GoalieChaseBall().execute( agent );
-        return;
-    }
-
-    // Intercept completo (Cyrus): comprometerse a una intercepción que ganamos
-    // CLARO (más rápido que los compañeros y 2+ pasos antes que el rival), pero
-    // SOLO si el punto de corte cae dentro de nuestra área → nunca abandona el
-    // arco persiguiendo un 50/50. Complementa el chase conservador (que solo
-    // cubre el área chica): aquí extendemos a toda el área grande cuando es
-    // claramente nuestro.
-    const int self_min = wm.interceptTable().selfStep();
-    const int mate_min = wm.interceptTable().teammateStep();
-    const int opp_min  = wm.interceptTable().opponentStep();
-    const Vector2D self_int = wm.ball().inertiaPoint( self_min );
-    if ( wm.gameMode().type() == GameMode::PlayOn
-         && self_min < mate_min
-         && self_min < opp_min - 2
-         && wm.ball().posCount() < 2
-         && self_int.x < SP.ourPenaltyAreaLineX()
-         && self_int.absY() < SP.penaltyAreaHalfWidth() )
-    {
-        if ( Body_Intercept( false ).execute( agent ) )
+        if(self_cycle < mate_cycle
+                && self_cycle < opp_cycle - 2
+                && agent->world().ball().posCount() < 2)
         {
-            dlog.addText( Logger::TEAM, __FILE__": doMove -> full intercept (clear win)" );
-            agent->debugClient().addMessage( "GKFullInt" );
-            agent->setNeckAction( new Neck_TurnToBall() );
-            return;
+            if(Body_Intercept(false).execute(agent))
+            {
+                dlog.addText(Logger::TEAM,
+                __FILE__": execute full interception");
+                agent->setNeckAction(new Neck_TurnToBall());
+                action_selected = true;
+            }
         }
     }
-
-    dlog.addText( Logger::TEAM, __FILE__": doMove -> basicMove" );
-    Bhv_GoalieBasicMove().execute( agent );
+    if(!action_selected)
+    {
+        Bhv_GoalieBasicMove().execute(agent);
+    }
 }

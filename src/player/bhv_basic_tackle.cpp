@@ -428,3 +428,96 @@ Bhv_BasicTackle::executeV14( PlayerAgent * agent,
 
     return true;
 }
+
+/*-------------------------------------------------------------------*/
+// Port Cyrus verbatim (move_def/bhv_basic_tackle.cpp:55-143) — umbral de
+// tackle dinámico usado por el portero migrado y bhv_tackle_intercept.
+double Bhv_BasicTackle::calc_takle_prob(const rcsc::WorldModel & wm, Vector2D bp){
+    const ServerParam & SP = ServerParam::i();
+
+    const int self_min = wm.interceptTable().selfStep();
+    const int mate_min = wm.interceptTable().teammateStep();
+    const int opp_min = wm.interceptTable().opponentStep();
+    const int our_min = std::min(mate_min,self_min);
+
+    const Vector2D end_ball = wm.ball().inertiaPoint(std::min(self_min,std::min(opp_min,mate_min)));
+    Vector2D ballpos = wm.ball().pos();
+
+    bool ball_in_our_goal = false;
+    if(end_ball.x < -52){
+        if(end_ball.dist(ballpos) > 0.1){
+            Line2D ball_move = Line2D(ballpos,end_ball);
+            Line2D goal_line = Line2D(Vector2D(-52.5,0),90);
+            Vector2D intersect = ball_move.intersection(goal_line);
+            if(intersect.isValid()){
+                if(intersect.absY() < 7.5){
+                    ball_in_our_goal = true;
+                }
+            }
+        }
+    }
+    if(ball_in_our_goal)
+        return 0.1;
+    if(end_ball.x < -47 && end_ball.absY() < 8){
+        if(opp_min <= 1)
+            return 0.1;
+        return 0.3;
+    }
+    if(bp.isValid())
+        ballpos = bp;
+    double prob = 0.9;
+    if(wm.ball().vel().r()>0.05 || wm.ball().posCount() < 4){
+        if(end_ball.absX() > 52.5 || end_ball.absY() > 34.0){
+            if(end_ball.x < -52.5){
+                const Ray2D ball_ray( ballpos, wm.ball().vel().th() );
+                const Line2D goal_line( Vector2D( -SP.pitchHalfLength(), 10.0 ),
+                                        Vector2D( -SP.pitchHalfLength(), -10.0 ) );
+                const Vector2D intersect = ball_ray.intersection( goal_line );
+                if ( intersect.isValid()
+                     && intersect.absY() < SP.goalHalfWidth() + 1.0
+                     && wm.ball().inertiaPoint(mate_min).x < -52)
+                {
+                    prob = 0.4;
+                }
+            }else if(end_ball.x > 52.5){
+                const Ray2D ball_ray( ballpos, wm.ball().vel().th() );
+                const Line2D goal_line( Vector2D( SP.pitchHalfLength(), 10.0 ),
+                                        Vector2D( SP.pitchHalfLength(), -10.0 ) );
+                const Vector2D intersect = ball_ray.intersection( goal_line );
+                if ( intersect.isValid()
+                     && intersect.absY() < SP.goalHalfWidth() + 1.0 )
+                {
+                    prob = 0.3;
+                }
+            }else{
+                if(wm.lastKickerSide() == wm.ourSide()){
+                    prob = 0.4;
+                }else{
+                    prob = 0.8;
+                }
+            }
+        }else{
+            if(ballpos.x > 35 && ballpos.absY() < 10 && ((ballpos - wm.self().pos()).th() - (Vector2D(52,0) - wm.self().pos()).th()).abs() < 30){
+                prob = 0.5;
+            }else if(ballpos.x > 35 && ballpos.absY() < 10){
+                prob = 0.7;
+            }
+            else if(ballpos.x > wm.ourDefenseLineX() + 15){
+                if (opp_min < our_min && wm.self().pos().dist(end_ball) > 3.0){
+                    prob = 0.5;
+                }else{
+                    prob = 0.8;
+                }
+            }else{
+                if (opp_min < our_min && wm.self().pos().dist(end_ball) > 3.0){
+                    prob = 0.4;
+                }else{
+                    prob = 0.9;
+                }
+            }
+        }
+    }else{
+        prob = 0.9;
+    }
+    return prob;
+}

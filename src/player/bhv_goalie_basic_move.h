@@ -36,11 +36,6 @@ namespace rcsc {
 class Formation;
 }
 
-// Portero — posicionamiento.
-// El portero SOLO se posiciona aquí (ángulo preciso, bisector MarliK 2011).
-// La decisión de SALIR a por el balón vive en Bhv_GoalieChaseBall::
-// is_ball_chase_situation (llamada desde RoleGoalie::doMove). Separar
-// "posicionar" de "salir" mantiene el comportamiento claro y predecible.
 class Bhv_GoalieBasicMove
     : public rcsc::SoccerBehavior {
 public:
@@ -52,7 +47,40 @@ public:
 
 private:
 
+    bool doOffensiveIntercept( rcsc::PlayerAgent * agent );
+    bool doOffensivePositioning( rcsc::PlayerAgent * agent );
+    void getOffenseivePos( rcsc::PlayerAgent * agent,
+                           rcsc::Vector2D &move_point );
+    double getOffensiveMoveDashPower( rcsc::PlayerAgent * agent,
+                                      const rcsc::Vector2D & homePos );
+
     rcsc::Vector2D getTargetPoint( rcsc::PlayerAgent * agent );
+    double getBasicDashPower( rcsc::PlayerAgent * agent,
+                              const rcsc::Vector2D & move_point );
+
+    bool doPrepareDeepCross( rcsc::PlayerAgent * agent,
+                             rcsc::Vector2D & move_point );
+    bool doStopAtMovePoint( rcsc::PlayerAgent * agent,
+                            const rcsc::Vector2D & move_point );
+    bool doMoveForDangerousState( rcsc::PlayerAgent * agent,
+                                  const rcsc::Vector2D & move_point );
+    bool doCorrectX( rcsc::PlayerAgent * agent,
+                     const rcsc::Vector2D & move_point );
+    bool doCorrectBodyDir( rcsc::PlayerAgent * agent,
+                           const rcsc::Vector2D & move_point,
+                           const bool consider_opp );
+    bool doGoToMovePoint( rcsc::PlayerAgent * agent,
+                          const rcsc::Vector2D & move_point );
+
+
+    void doGoToPointLookBall( rcsc::PlayerAgent * agent,
+                              const rcsc::Vector2D & target_point,
+                              const rcsc::AngleDeg & body_angle,
+                              const double & dist_thr,
+                              const double & dash_power,
+                              const double & back_power_rate = 0.7 );
+
+    bool doHeliosGolie( rcsc::PlayerAgent * agent);
 
 };
 

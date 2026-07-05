@@ -40,14 +40,11 @@ public:
     bool execute( rcsc::PlayerAgent * agent );
 
     static
-    bool is_ball_chase_situation( const rcsc::PlayerAgent * agent );
+    bool is_ball_chase_situation( rcsc::PlayerAgent * agent );
     static
     bool is_ball_shoot_moving( const rcsc::PlayerAgent * agent );
 
-    // Lateral omni/back-dash reach (forward dash / bipedal turn-dash / back dash
-    // by relative angle, no turn-first). Reused by the goalie SAVE so it reaches
-    // the FAR post fast. Read-only on instance state → static.
-    static
+private:
     void doGoToCatchPoint( rcsc::PlayerAgent * agent,
                            const rcsc::Vector2D & target_point );
 
