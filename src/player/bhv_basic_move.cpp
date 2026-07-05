@@ -361,7 +361,9 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
          && role == 11
          && our_team_has_initiative
          && wm.self().stamina() > ServerParam::i().staminaMax() * 0.40
-         && wm.ball().pos().x > 0.0
+         // O2 (2026-07-05): 0.0 → -10.0 — entre x=-10 y 0 el ancla no aplicaba
+         // y el home wide mandaba; P11 llegaba tarde al carril central.
+         && wm.ball().pos().x > -10.0
          && me.x < wm.offsideLineX() - 0.5 )
     {
         double anchor_x = std::min( wm.ball().pos().x + 10.0, wm.offsideLineX() - 1.0 );
@@ -375,6 +377,54 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                       __FILE__": P11 central anchor → (%.1f, %.1f)",
                       anchor_x, anchor_y );
         agent->debugClient().addMessage( "CFAnchor" );
+
+        // O4 (2026-07-05): la punta del penal también pide el balón (ver
+        // nota en el far-post crash). Solo en zona de definición para no
+        // saturar el presupuesto de say (PassRequest = 4 chars de 10).
+        if ( wm.kickableTeammate() && wm.ball().pos().x > 20.0 ) {
+            agent->addSayMessage( new PassRequestMessage( target_point ) );
+        }
+    }
+
+    // ── SideForward lado débil: llegada al segundo palo ──────────────────────
+    // Datos (2026-07-03, 4 partidos vs SRBIAU2D, formaciones ya sanas): con el
+    // balón profundo (x>36) en el 29% de los ciclos no hay NADIE nuestro en la
+    // zona de remate central y en el 38% solo uno → los centros/cutbacks no
+    // tienen destinatario (25 pérdidas/partido en campo rival, 1 remate/partido).
+    // El SideForward del lado CONTRARIO al balón ataca el segundo palo; el del
+    // lado del balón mantiene su juego de banda.
+    if ( ! forward_run_active
+         && ( role == 9 || role == 10 )
+         && our_team_has_initiative
+         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.40
+         // O2 (2026-07-05): 30.0 → 25.0 — la carrera arranca antes; con O1 el
+         // llegador ya espera en la línea (x≈32), esto lo lanza HACIA el área
+         // en cuanto el balón entra en zona de centro (medido: receptor parado
+         // en x=32 es invisible para el cross_generator, que exige <16m del arco).
+         && wm.ball().pos().x > 25.0
+         && me.x < wm.offsideLineX() - 0.5 )
+    {
+        const double my_side = ( role == 9 ) ? -1.0 : 1.0;   // 9=izq, 10=der
+        if ( wm.ball().pos().y * my_side < -8.0 )   // balón en la banda contraria
+        {
+            double crash_x = std::min( wm.ball().pos().x + 6.0, 44.0 );
+            crash_x = std::max( crash_x, 36.0 );
+            crash_x = std::min( crash_x, wm.offsideLineX() - 0.5 );
+
+            target_point = Vector2D( crash_x, my_side * 6.5 );  // segundo palo
+            forward_run_active = true;  // saltar Bhv_Unmark (premia ir wide)
+            dlog.addText( Logger::TEAM,
+                          __FILE__": SF far-post crash → (%.1f, %.1f)",
+                          target_point.x, target_point.y );
+            agent->debugClient().addMessage( "FarPost" );
+
+            // O4 (2026-07-05): el llegador PIDE el balón — el generador de
+            // pases escucha PassRequestMessage (strict_check L947) pero solo
+            // lo emitía el "mejor receptor" adelantado; el del 2º palo, no.
+            if ( wm.kickableTeammate() ) {
+                agent->addSayMessage( new PassRequestMessage( target_point ) );
+            }
+        }
     }
 
     if ( ! forward_run_active
@@ -462,6 +512,14 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
                 // abandons the penalty spot and creates only corner shots.
                 if ( role == 11 && candidate.absY() > 8.0 )
                     score -= ( candidate.absY() - 8.0 ) * 1.2;
+
+                // O2 (2026-07-05): en zona de definición (x>30) los extremos
+                // también prefieren candidatos centrales — el término de
+                // "arrastrar marcas" (−min_opp_dist) premiaba pegarse al
+                // lateral rival en banda contra un punto central libre.
+                if ( ( role == 9 || role == 10 )
+                     && candidate.x > 30.0 && candidate.absY() > 10.0 )
+                    score -= ( candidate.absY() - 10.0 ) * 1.0;
 
                 if ( score > best_score )
                 {
@@ -803,6 +861,10 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
     // Replegarse solo si el rival gana CLARAMENTE la carrera al balón.
     // Antes (opp_min < our+3) los medios se replegaban incluso ganando
     // nosotros la carrera por 2 ciclos — equipo cohibido en transición.
+    // NOTA (2026-07-03): se probó relajar esto a gap 2 + ball.x<0 (P3) y
+    // EMPEORÓ (A/B 10+10: GF a la mitad en 3 rivales, GA vs HELIOS 7.1→10.1
+    // — los medios vivían replegados vs rivales dominantes y el ataque quedó
+    // aislado). Si se reintenta, UNA sola relajación a la vez y con A/B.
     if ( role >= 6 && role <= 8
          && ! wm.kickableTeammate()
          && opp_min + 2 < std::min( self_min, mate_min )

@@ -95,13 +95,26 @@ if [ "$need_docker" = true ] && [ "${DOCKER%% *}" = "sudo" ]; then
   SUDO_KEEPALIVE_PID=$!
 fi
 
+local_srv=""   # PID del rcssserver del partido en curso (para poder matarlo)
+
 cleanup_all() {
-  [ -n "$SUDO_KEEPALIVE_PID" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
+  [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
+  [ -n "${local_srv:-}" ] && kill "$local_srv" 2>/dev/null          # server actual por PID
   $DOCKER rm -f rt_opp >/dev/null 2>&1
   pkill -f "$OURBIN/sample_player" 2>/dev/null
   pkill -f "$OURBIN/sample_coach"  2>/dev/null
+  [ -n "$SRV" ] && pkill -f "$SRV" 2>/dev/null                       # rcssserver huerfano
 }
-trap cleanup_all EXIT INT TERM
+
+# Ctrl-C / kill: limpiar y SALIR (antes solo limpiaba y el bucle seguia lanzando
+# partidos -> parecia que "abria varios simuladores y no paraba").
+on_interrupt() {
+  echo ""; echo ">> Senal recibida (Ctrl-C) — deteniendo y limpiando…"
+  cleanup_all
+  exit 130
+}
+trap on_interrupt INT TERM   # interrupcion -> limpia y sale de verdad
+trap cleanup_all  EXIT       # salida normal  -> solo limpia
 
 kill_match() {   # limpia entre partidos (server por PID, no por -f)
   [ -n "${1:-}" ] && kill "$1" 2>/dev/null
@@ -157,10 +170,19 @@ for row in "${OPPONENTS[@]}"; do
     local_srv=$!
     sleep 2
 
-    # nuestro equipo primero (queda IZQUIERDA); CWD=build/bin para cargar pesos+formaciones
-    ( cd "$OURBIN" && ./start.sh -h localhost -p 6000 -t "$OURNAME" >/dev/null 2>&1 )
-    sleep 1
-    launch_opponent "$rt" "$dir" "$launch" "$style"
+    # ALTERNAR LADOS: partidos impares nosotros IZQUIERDA, pares DERECHA
+    # (el primero en conectar queda left; cancela el sesgo de lado).
+    # CWD=build/bin para cargar pesos+formaciones. El parseo del marcador de
+    # abajo ya es side-aware (usa "'L' vs 'R'" del .out), no necesita cambios.
+    if [ $((i % 2)) -eq 1 ]; then
+      ( cd "$OURBIN" && ./start.sh -h localhost -p 6000 -t "$OURNAME" >/dev/null 2>&1 )
+      sleep 1
+      launch_opponent "$rt" "$dir" "$launch" "$style"
+    else
+      launch_opponent "$rt" "$dir" "$launch" "$style"
+      sleep 1
+      ( cd "$OURBIN" && ./start.sh -h localhost -p 6000 -t "$OURNAME" >/dev/null 2>&1 )
+    fi
 
     # esperar a que el server termine solo (auto_mode); tope generoso
     for s in $(seq 1 900); do kill -0 $local_srv 2>/dev/null || break; sleep 1; done

@@ -265,7 +265,10 @@ CrossGenerator::updatePasser( const WorldModel & wm )
 void
 CrossGenerator::updateReceivers( const WorldModel & wm )
 {
-    static const double shootable_dist2 = std::pow( 16.0, 2 ); // Magic Number
+    // O3 (2026-07-05): 16→20 m. Con la plantilla O1 los llegadores esperan en
+    // la línea (x≈32, >16m del arco) y eran INVISIBLES para el cross; 20 m +
+    // inertiaFinalPoint (abajo) hace candidato al que YA corre al área.
+    static const double shootable_dist2 = std::pow( 20.0, 2 );
     static const double min_cross_dist2
         = std::pow( ServerParam::i().defaultKickableArea() * 2.2, 2 );
     static const double max_cross_dist2
@@ -300,9 +303,13 @@ CrossGenerator::updateReceivers( const WorldModel & wm )
             }
         }
 
-        if ( (*p)->pos().dist2( goal ) > shootable_dist2 ) continue;
+        // O3: filtrar por el punto de LLEGADA (inertiaFinalPoint), no por la
+        // posición actual — el receptor en carrera cuenta donde va a estar
+        // (los cursos de abajo ya usan inertiaFinalPoint; el filtro no).
+        const Vector2D receive_pt = (*p)->inertiaFinalPoint();
+        if ( receive_pt.dist2( goal ) > shootable_dist2 ) continue;
 
-        double d2 = (*p)->pos().dist2( M_first_point );
+        double d2 = receive_pt.dist2( M_first_point );
         if ( d2 < min_cross_dist2 ) continue;
         if ( max_cross_dist2 < d2 ) continue;
 

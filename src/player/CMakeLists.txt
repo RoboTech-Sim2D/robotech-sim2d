@@ -108,6 +108,7 @@ add_executable(sample_player
   data_extractor/offensive_data_extractor.cpp
   bhv_unmark.cpp
   bhv_basic_block.cpp
+  cyrus_interceptable.cpp
   bhv_mark_opponent.cpp
   bhv_defensive_move.cpp
   bhv_mark_execute.cpp

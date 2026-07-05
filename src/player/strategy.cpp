@@ -927,6 +927,35 @@ Strategy::updatePosition( const WorldModel & wm )
                             if (OffsideSegm_cont.size() > 2)
                                 mid_pt = OffsideSegm_cont[2];
 
+                            // P1 (2026-07-03): reservar SEGUNDO PALO/centro en
+                            // la asignación profunda. Los huecos salen ordenados
+                            // desde la esquina del lado del balón: con el ataque
+                            // cargado a la banda los 3 puntos quedan laterales y
+                            // nadie ocupa el centro (medido: 29-40% de los ciclos
+                            // con balón en x>36 SIN jugadores en zona de remate).
+                            // Si ningún punto es central (|y|<10) ni del lado
+                            // contrario, el tercero (el delantero del lado débil)
+                            // se recoloca al segundo palo sobre la misma línea.
+                            {
+                                const double ball_side =
+                                    ( wm.ball().pos().y >= 0.0 ? 1.0 : -1.0 );
+                                auto central_or_far = [&]( const Vector2D & p ) {
+                                    return p.x > -1.0
+                                        && ( fabs( p.y ) < 10.0
+                                             || p.y * ball_side < -3.0 );
+                                };
+                                if ( ! central_or_far( first_pt )
+                                     && ! central_or_far( mid_pt )
+                                     && ! central_or_far( third_pt ) )
+                                {
+                                    const double post_x =
+                                        ( third_pt.x > -1.0 ? third_pt.x
+                                          : ( first_pt.x > -1.0 ? first_pt.x
+                                              : y1.x ) );
+                                    third_pt = Vector2D( post_x, -ball_side * 7.0 );
+                                }
+                            }
+
                             int first_unum = -1;
                             int sec_unum = -1;
                             int third_unum = -1;
@@ -1078,9 +1107,13 @@ Strategy::updatePosition( const WorldModel & wm )
 
     const int our_min = std::min(self_min, mate_min);
 
-    // G2d : wing tactic
-    double wing_x = -15.0;
-    double wing_y = 7.0;
+    // G2d : wing tactic → O1 (2026-07-05): PLANTILLA DE OCUPACIÓN DEL ÁREA.
+    // Trigger ESTRECHO: antes se disparaba desde x=-15 (pleno build-up) y con
+    // |y|>7 → 6 jugadores subían en cualquier posesión y por ahí llegaban los
+    // contragolpes (46 goles de transición en competencia). Ahora solo con
+    // balón claramente ofensivo (x>15) y de verdad en banda (|y|>12).
+    double wing_x = 15.0;
+    double wing_y = 12.0;
     double wing_depth = 5.0;
     double wing_limit = 39.0;
 
@@ -1101,28 +1134,45 @@ Strategy::updatePosition( const WorldModel & wm )
                         M_positions[10 - 1].x = wm.offsideLineX() + wm.ball().vel().x;
                         M_positions[11 - 1].x = wm.offsideLineX() + wm.ball().vel().x;
 
+                        // O1 (2026-07-05, análisis del equipo): PLANTILLA DE
+                        // OCUPACIÓN DEL ÁREA. El desmarque orbita ≤7m del home
+                        // (bhv_unmark) → con homes centrales, unmark/3-ring/
+                        // generadores trabajan para el centro solos. Datos
+                        // competencia: 1.62 compañeros centrales, 8 toques
+                        // centrales vs 40 en banda, 2.2 remates/partido.
+                        // Ocupación (balón en banda derecha):
+                        //   P10 amplitud 28 | P11 punto penal +3 | P9 2º palo -9
+                        //   P7 (OH débil) BORDE DEL ÁREA offside-8 para el
+                        //   cutback | P8 half-space apoyo | P6 rest-defense
+                        //   offside-18 (vigilar GF: knob riesgoso, ver memoria).
+                        double midX = wm.offsideLineX() - wing_depth;
+
                         if (wm.ball().pos().y > 0)
                         {
-                            M_positions[9 - 1].y = 15.0;
-                            M_positions[11 - 1].y = 22.5;
-                            M_positions[10 - 1].y = 30.0;
+                            M_positions[10 - 1].y = 28.0;   // extremo der: amplitud
+                            M_positions[11 - 1].y = 3.0;    // punta: punto penal
+                            M_positions[9 - 1].y = -9.0;    // extremo izq: 2º palo
+
+                            M_positions[8 - 1].x = midX;    // medio der: half-space
+                            M_positions[8 - 1].y = 14.0;
+                            M_positions[7 - 1].x = wm.offsideLineX() - 8.0; // OH débil:
+                            M_positions[7 - 1].y = -4.0;    //   borde del área (cutback)
+                            M_positions[6 - 1].x = wm.offsideLineX() - 18.0; // pivote:
+                            M_positions[6 - 1].y = 6.0;     //   rest-defense
                         }
                         else
                         {
-                            M_positions[9 - 1].y = -30.0;
-                            M_positions[11 - 1].y = -22.5;
-                            M_positions[10 - 1].y = -15.0;
+                            M_positions[9 - 1].y = -28.0;   // extremo izq: amplitud
+                            M_positions[11 - 1].y = -3.0;   // punta: punto penal
+                            M_positions[10 - 1].y = 9.0;    // extremo der: 2º palo
+
+                            M_positions[7 - 1].x = midX;    // medio izq: half-space
+                            M_positions[7 - 1].y = -14.0;
+                            M_positions[8 - 1].x = wm.offsideLineX() - 8.0; // OH débil:
+                            M_positions[8 - 1].y = 4.0;     //   borde del área (cutback)
+                            M_positions[6 - 1].x = wm.offsideLineX() - 18.0; // pivote:
+                            M_positions[6 - 1].y = -6.0;    //   rest-defense
                         }
-
-                        double midX = wm.offsideLineX() - wing_depth;
-
-                        M_positions[6 - 1].x = midX;
-                        M_positions[7 - 1].x = midX;
-                        M_positions[8 - 1].x = midX;
-
-                        M_positions[7 - 1].y = M_positions[9 - 1].y;
-                        M_positions[6 - 1].y = M_positions[11 - 1].y;
-                        M_positions[8 - 1].y = M_positions[10 - 1].y;
                     }
 
     M_position_types.clear();

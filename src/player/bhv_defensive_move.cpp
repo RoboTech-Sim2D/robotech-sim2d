@@ -15,6 +15,7 @@
 #include "strategy.h"
 #include "bhv_mark_execute.h"
 #include "bhv_basic_block.h"
+#include "cyrus_interceptable.h"
 
 #include "basic_actions/body_go_to_point.h"
 #include "basic_actions/body_turn_to_point.h"
@@ -24,6 +25,7 @@
 #include <rcsc/player/player_agent.h>
 #include <rcsc/player/world_model.h>
 #include <rcsc/player/intercept_table.h>
+#include <rcsc/common/server_param.h>
 #include <rcsc/player/debug_client.h>
 #include <rcsc/common/logger.h>
 #include <rcsc/geom/vector_2d.h>
@@ -72,6 +74,63 @@ bool Bhv_DefensiveMove::execute( rcsc::PlayerAgent * agent )
     if ( wm.interceptTable().firstOpponent() == nullptr
       || wm.interceptTable().firstOpponent()->unum() < 1 ) {
         return false;
+    }
+
+    // ── PRESS al portador que CIRCULA (2026-07-03) ──
+    // Con las formaciones ya sanas, los goles encajados dejaron de ser
+    // penetraciones rápidas: son posesiones de 60-120 ciclos en nuestra mitad
+    // con el back más cercano a ~6.6 m del balón. El bloqueo de arriba
+    // intercepta trayectorias de REGATE, así que al rival que solo pasa el
+    // balón nadie lo molesta. Aquí el jugador de campo MÁS CERCANO al balón
+    // (uno solo, radio corto) sale a presionarlo por el lado de nuestra
+    // portería; la línea no se mueve porque el resto sigue en marca/hueco.
+    {
+        const AbstractPlayerObject * carrier = wm.interceptTable().firstOpponent();
+        const Vector2D ball_pos = wm.ball().pos();
+        const double my_dist = wm.self().pos().dist( ball_pos );
+
+        if ( ( wm.kickableOpponent() || opp_min <= 1 )
+             && ball_pos.x < -15.0
+             && my_dist < 8.0
+             && wm.self().stamina() > ServerParam::i().recoverDecThrValue() + 600.0 )
+        {
+            bool i_am_nearest     = true;
+            bool someone_pressing = false;
+            for ( const PlayerObject * tm : wm.teammatesFromBall() )
+            {
+                if ( ! tm || tm->unum() < 1 || tm->goalie() ) continue;
+                const double d = tm->pos().dist( ball_pos );
+                if ( d < 2.5 ) { someone_pressing = true; }
+                else if ( d < my_dist - 0.3 ) { i_am_nearest = false; }
+                break;   // solo el compañero (de campo) más cercano importa
+            }
+
+            if ( i_am_nearest && ! someone_pressing )
+            {
+                // FASE 1 (2026-07-03): presionar el punto de TRAP predicho
+                // (CyrusPlayerIntercept) — con el pase en viaje llega al
+                // punto de recepción, no a donde está parado el receptor.
+                Vector2D press_base = carrier->pos();
+                Vector2D trap_pos;
+                if ( CyrusPlayerIntercept::opponentTrap( wm, &trap_pos, nullptr )
+                     && trap_pos.isValid()
+                     && trap_pos.dist( press_base ) < 15.0 ) {
+                    press_base = trap_pos;
+                }
+
+                Vector2D our_goal( -ServerParam::i().pitchHalfLength(), 0.0 );
+                Vector2D press_pt = press_base
+                    + ( our_goal - press_base ).setLengthVector( 1.5 );
+
+                agent->debugClient().addMessage( "CarrierPress" );
+                agent->debugClient().setTarget( press_pt );
+                if ( ! Body_GoToPoint( press_pt, 0.4, 100.0 ).execute( agent ) ) {
+                    Body_TurnToPoint( ball_pos ).execute( agent );
+                }
+                agent->setNeckAction( new Neck_TurnToBall() );
+                return true;
+            }
+        }
     }
 
     // Phase 4 will replace this with bhv_mark_execute.

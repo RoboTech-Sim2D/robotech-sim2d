@@ -266,11 +266,22 @@ void BhvMarkDecisionGreedy::midMarkDecision(
         }
         if ( !free_tms.empty() && !unmarked_opps.empty() ) {
             for ( auto o : unmarked_opps ) {
+                const AbstractPlayerObject * opp_p = wm.theirPlayer( (int)o );
+                double opp_y = opp_p ? opp_p->pos().y : 0.0;
                 for ( auto t : free_tms ) {
                     const AbstractPlayerObject * tm = wm.ourPlayer( (int)t );
                     if ( !tm || tm->unum() < 1 ) continue;
                     Target target = MarkPositionFinder::getLeadProjectionMarkTarget( (int)t, (int)o, wm );
-                    lead_eval[o][t] = tm->pos().dist( target.pos );
+                    double cost = tm->pos().dist( target.pos );
+                    // Prevent side backs from crossing to wrong band
+                    // (misma regla que ThMark/DangerMark; era la única matriz sin ella)
+                    int role = Strategy::i().roleNumber( (int)t );
+                    if ( role == 4 || role == 5 ) {
+                        Vector2D home = Strategy::i().getPosition( (int)t );
+                        if ( home.y < -3.0 && opp_y > 5.0 ) cost += 60.0;
+                        if ( home.y >  3.0 && opp_y < -5.0 ) cost += 60.0;
+                    }
+                    lead_eval[o][t] = cost;
                 }
             }
             auto r2 = BestMatchFinder::find_best_dec( lead_eval, free_tms, unmarked_opps );

@@ -73,6 +73,11 @@ const size_t ActionChainGraph::DEFAULT_MAX_CHAIN_LENGTH = 6;
 // esos picos hacían PERDER la acción (lost kick/dash al decidir el pase → balón
 // perdido). 250 acota el peor caso a ~la mitad (<50ms) sin tocar el promedio, la
 // profundidad de cadena (6) ni el DNN. Subir a 300-350 si el ataque se nota recortado.
+//
+// O5 PROBADO Y REVERTIDO (2026-07-05): 250→320 devolvió los picos en pleno
+// juego (124-160 ms medidos con el profiling de sample_player, la enfermedad
+// de jun-21) a cambio de una ganancia marginal (remates 1.7→2.0). NO volver a
+// subirlo: el costo por nodo ya bajó con el DNN apagado y aun así no alcanza.
 const size_t ActionChainGraph::DEFAULT_MAX_EVALUATE_LIMIT = 250;
 
 std::vector< std::pair< Vector2D, double > > ActionChainGraph::S_evaluated_points;

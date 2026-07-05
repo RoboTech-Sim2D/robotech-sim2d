@@ -242,58 +242,25 @@ Bhv_GoalieChaseBall::doGoToCatchPoint( PlayerAgent * agent,
         agent->debugClient().addMessage( "GoToCatch:Forward" );
         agent->doDash( dash_power );
     }
-    // back dash
-    else if ( rel_angle.abs() > 180.0 - angle_buf )
-    {
-        dash_power = SP.minDashPower();
-
-        double required_stamina = ( SP.minDashPower() < 0.0
-                                    ? SP.minDashPower() * -2.0
-                                    : SP.minDashPower() );
-        if ( wm.self().stamina() + wm.self().playerType().extraStamina()
-             < required_stamina )
-        {
-            dash_power = wm.self().stamina() + wm.self().playerType().extraStamina();
-            if ( SP.minDashPower() < 0.0 )
-            {
-                dash_power *= -0.5;
-                if ( dash_power < SP.minDashPower() )
-                {
-                    dash_power = SP.minDashPower();
-                }
-            }
-        }
-
-        dlog.addText( Logger::TEAM,
-                      __FILE__": back dash. power=%.1f",
-                      dash_power );
-        agent->debugClient().addMessage( "GoToCatch:Back" );
-        agent->doDash( dash_power );
-    }
-    // forward/diagonal: dash OMNIDIRECCIONAL hacia el punto (dirección rel_angle),
-    // sin girar primero. PORTABLE: el bipedal dash (doBipedalDash) es de
-    // rcssserver v19 y solo está en nuestra librcsc parcheada (~/rc/tools); una
-    // librcsc v18 estándar (la de otros integrantes) no lo tiene y no compilaba.
-    // doDash(power, dir) sí está en librcsc v18 y logra lo mismo: avanzar hacia
-    // el punto en diagonal en un solo ciclo.
-    else if ( rel_angle.abs() < 90.0 )
+    // BUG 1 DEL PORTERO (2026-07-05, análisis del equipo): la rama de back-dash
+    // usaba SP.minDashPower() como potencia — en el server v19 (local Y
+    // competencia) min_dash_power = 0 → doDash(0) ciclo tras ciclo = portero
+    // CONGELADO justo cuando el punto de atajada le queda a la espalda (tiro
+    // cruzado al otro palo con el cuerpo de costado). Evidencia competencia:
+    // 0 back-dashes en 19 partidos, 325 dashes de potencia ~0 en zona
+    // defensiva, 27/67 goles con el portero inmóvil (13 atajables ≈ 0.7
+    // goles/partido regalados). FIX: TODO lo que no sea dash frontal va por
+    // dash OMNIDIRECCIONAL doDash(power, dir) — existe en librcsc v18 y v19,
+    // el server aplica la tasa direccional que toque y NUNCA emite potencia 0.
+    else
     {
         const double power = std::min( wm.self().stamina() + wm.self().playerType().extraStamina(),
                                        SP.maxDashPower() );
         dlog.addText( Logger::TEAM,
                       __FILE__": omni dash dir=%.1f power=%.1f",
                       rel_angle.degree(), power );
-        agent->debugClient().addMessage( "GoToCatch:OmniF" );
+        agent->debugClient().addMessage( "GoToCatch:Omni" );
         agent->doDash( power, rel_angle );
-    }
-    else
-    {
-        rel_angle -= 180.0;
-        dlog.addText( Logger::TEAM,
-                      __FILE__": turn %.1f for back dash",
-                      rel_angle.degree() );
-        agent->debugClient().addMessage( "GoToCatch:B-Turn" );
-        agent->doTurn( rel_angle );
     }
 
     agent->setNeckAction( new Neck_TurnToBall() );

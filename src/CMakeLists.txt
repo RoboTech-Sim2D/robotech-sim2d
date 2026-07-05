@@ -42,3 +42,17 @@ file(COPY
   # DESTINATION ${PROJECT_BINARY_DIR}/src/
   DESTINATION ${PROJECT_BINARY_DIR}/bin
   )
+
+# file(COPY) solo corre al RECONFIGURAR cmake, no en cada make: build/bin se
+# quedaba con formaciones/pesos viejos aunque src/ cambiara (3 semanas jugando
+# con formations-dt de junio-12 corruptas). Este target re-sincroniza en CADA
+# build. Incluye field_eval_weights.txt, que faltaba en la lista de arriba.
+add_custom_target(sync_runtime_data ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${PROJECT_SOURCE_DIR}/src/formations-dt ${PROJECT_BINARY_DIR}/bin/formations-dt
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${PROJECT_SOURCE_DIR}/src/field_eval_weights.txt
+          ${PROJECT_SOURCE_DIR}/src/unmark_dnn_weights.txt
+          ${PROJECT_BINARY_DIR}/bin/
+  COMMENT "Sincronizando formations-dt y pesos DNN a bin/"
+  )

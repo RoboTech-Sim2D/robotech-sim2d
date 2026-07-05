@@ -13,6 +13,7 @@
 #include "bhv_basic_block.h"
 #include "strategy.h"
 #include "bhv_basic_tackle.h"
+#include "cyrus_interceptable.h"
 #include "neck_offensive_intercept_neck.h"
 
 #include "basic_actions/body_turn_to_point.h"
@@ -113,8 +114,12 @@ int Bhv_BasicBlock::who_is_blocker( const WorldModel & wm )
 // ── get_blockers ─────────────────────────────────────────────────────────────
 std::vector<int> Bhv_BasicBlock::get_blockers( const WorldModel & wm )
 {
-    const int opp_min      = wm.interceptTable().opponentStep();
+    // FASE 1 (2026-07-03): punto de trap REAL del rival (CyrusPlayerIntercept)
+    // en vez de inertiaPoint(opponentStep) — ataca el "llegamos segundos"
+    // (44-47% de carreras perdidas). Fallback interno a la tabla estándar.
+    int       opp_min      = wm.interceptTable().opponentStep();
     Vector2D  ball_inertia = wm.ball().inertiaPoint( opp_min );
+    CyrusPlayerIntercept::opponentTrap( wm, &ball_inertia, &opp_min );
 
     std::vector<int> tm_blockers;
     for ( auto tm : wm.ourPlayers() )
@@ -159,8 +164,11 @@ std::pair<int, Vector2D>
 Bhv_BasicBlock::get_best_blocker( const WorldModel & wm,
                                    std::vector<int> & tm_blockers )
 {
-    const int opp_min      = wm.interceptTable().opponentStep();
+    // FASE 1 (2026-07-03): la simulación de regate arranca desde el punto de
+    // trap REAL del rival (misma predicción que get_blockers).
+    int       opp_min      = wm.interceptTable().opponentStep();
     Vector2D  ball_inertia = wm.ball().inertiaPoint( opp_min );
+    CyrusPlayerIntercept::opponentTrap( wm, &ball_inertia, &opp_min );
     const double dribble_speed = 0.7;
 
 #ifdef DEBUG_BLOCK

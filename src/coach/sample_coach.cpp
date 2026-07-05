@@ -377,14 +377,21 @@ SampleCoach::doFirstSubstitute()
     ordered_unum.push_back( 8 );  // defensive half
 #else
     // wing player has priority
+    // FLANCOS BALANCEADOS (2026-07-04): elegir "el más rápido disponible" en
+    // orden fijo hacía que P3 y P5 (pareja DERECHA) recibieran siempre tipos
+    // más lentos que sus espejos P2/P4 → competencia: 31/41 goles encajados
+    // entraron por nuestra banda derecha (P5 a 8.2m del balón vs P4 a 5.5m).
+    // Ahora la ventaja se alterna dentro de cada pareja (P2 primero en los
+    // centrales, P5 primero en los laterales): cada flanco queda con un
+    // defensa rápido y uno lento.
     ordered_unum.push_back( 11 ); // center forward
-    ordered_unum.push_back( 2 );  // center back
+    ordered_unum.push_back( 2 );  // center back (izq elige primero)
     ordered_unum.push_back( 3 );  // center back
     ordered_unum.push_back( 10 ); // side half
     ordered_unum.push_back( 9 );  // side half
     ordered_unum.push_back( 6 );  // center half
+    ordered_unum.push_back( 5 );  // side back (der elige primero)
     ordered_unum.push_back( 4 );  // side back
-    ordered_unum.push_back( 5 );  // side back
     ordered_unum.push_back( 7 );  // defensive half
     ordered_unum.push_back( 8 );  // defensive half
 #endif
@@ -398,12 +405,16 @@ SampleCoach::doFirstSubstitute()
     int gk_type = Hetero_Default;
     if ( config().version() >= 14.0 )
     {
-        // Portero = tipo MÁS RÁPIDO (antes se le forzaba el default → lento). El
-        // portero no necesita stamina ni pegada; lo único que importa es
-        // reaccionar y desplazarse rápido para llegar a los tiros. Era la causa
-        // principal de "se mueve lento / no reacciona".
-        gk_type = getFastestType( candidates );
-        if ( gk_type == Hetero_Unknown ) gk_type = Hetero_Default;
+        // BUG 2 DEL PORTERO (2026-07-05, análisis del equipo): "el más rápido"
+        // era la política correcta en servers viejos (velocidades variadas),
+        // pero en el server actual TODOS los tipos empatan en player_speed_max
+        // (1.05) → el desempate caía en parámetros ALEATORIOS del partido y el
+        // portero recibía un tipo hetero distinto cada vez (competencia: 4, 11,
+        // 5, 17, 16, 9…), pagando catchable_area_l_stretch >1 (catch GARANTIZADO
+        // de 1.20m → hasta 0.85m), effort_max y decay peores. Los 18 porteros
+        // rivales usaban type 0. Con velocidad empatada, el DEFAULT es
+        // estrictamente mejor para el arco → type 0 fijo.
+        gk_type = Hetero_Default;
         substituteTo( 1, gk_type ); // goalie
     }
     {

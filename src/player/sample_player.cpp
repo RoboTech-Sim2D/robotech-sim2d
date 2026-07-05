@@ -83,6 +83,8 @@
 #include <sstream>
 #include <string>
 #include <cstdlib>
+#include <chrono>    // PROFILING TEMPORAL O5
+#include <fstream>   // PROFILING TEMPORAL O5
 
 using namespace rcsc;
 
@@ -220,6 +222,26 @@ SamplePlayer::initImpl( CmdLineParser & cmd_parser )
 void
 SamplePlayer::actionImpl()
 {
+    // PROFILING TEMPORAL O5 (2026-07-05): vigilar que MAX_EVALUATE_LIMIT
+    // 250→320 no reintroduzca los picos >70ms que causaban lost-kick (jun-21).
+    // Solo registra eventos lentos en ./slow_actions.csv (CWD del lanzamiento
+    // = build/bin en las tandas). QUITAR tras validar la tanda O5.
+    struct ProfileGuard {
+        std::chrono::steady_clock::time_point t0;
+        const rcsc::WorldModel & wm;
+        explicit ProfileGuard( const rcsc::WorldModel & w )
+            : t0( std::chrono::steady_clock::now() ), wm( w ) { }
+        ~ProfileGuard() {
+            const double ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - t0 ).count() / 1000.0;
+            if ( ms > 70.0 ) {
+                std::ofstream f( "slow_actions.csv", std::ios::app );
+                f << wm.self().unum() << ',' << wm.time().cycle()
+                  << ',' << ms << '\n';
+            }
+        }
+    } profile_guard_( world() );
+
     SamplePlayer::player_port = this->config().port();
     if ( this->audioSensor().trainerMessageTime() == world().time() )
     {
@@ -817,8 +839,10 @@ SamplePlayer::createActionGenerator() const
     //
     // cross
     //
+    // O3 (2026-07-05): 1→2 — habilita el plan "pase al extremo → centro atrás"
+    // (el cutback real es a 2 toques y antes ni se enumeraba).
     g->addGenerator( new ActGen_MaxActionChainLengthFilter
-                     ( new ActGen_Cross(), 1 ) );
+                     ( new ActGen_Cross(), 2 ) );
 
     //
     // direct pass

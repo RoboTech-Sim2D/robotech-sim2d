@@ -162,10 +162,29 @@ Bhv_GoalieBasicMove::execute( PlayerAgent * agent )
 
     // Si hay que moverse, a MÁXIMA potencia: el portero apenas se desplaza,
     // la stamina nunca es problema; ir lento lo hace ver "congelado".
-    if ( dist > 0.4 )
+    //
+    // BUG 3 DEL PORTERO (2026-07-05, análisis del equipo): con deadband 0.4 y
+    // Body_GoToPoint, el GK peleaba consigo mismo — GoToPoint GIRA el cuerpo
+    // hacia el target MarliK (que se desliza cada ciclo) y el bloque de abajo
+    // lo devuelve a ±90°: 14,080 turns vs 4,927 dashes en la competencia.
+    // FIX: histéresis 0.7m (deltas menores no valen un giro) y los ajustes
+    // CORTOS se hacen con dash OMNI manteniendo el cuerpo de costado; solo
+    // los desplazamientos largos usan Body_GoToPoint.
+    if ( dist > 0.7 )
     {
         agent->debugClient().addMessage( "GK_Pos" );
         agent->debugClient().setTarget( move_point );
+
+        if ( dist < 2.5 )
+        {
+            AngleDeg rel_dir = ( move_point - wm.self().pos() ).th()
+                - wm.self().body();
+            const double power = std::min( SP.maxDashPower(), dist * 40.0 );
+            agent->doDash( power, rel_dir );
+            agent->setNeckAction( new Neck_GoalieTurnNeck() );
+            return true;
+        }
+
         if ( ! Body_GoToPoint( move_point, 0.3, SP.maxDashPower() ).execute( agent ) )
         {
             Body_TurnToBall().execute( agent );

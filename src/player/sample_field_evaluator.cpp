@@ -255,7 +255,10 @@ SampleFieldEvaluator::operator()(const PredictState &state,
 
                 if ( is_cutback )
                 {
-                    result += 6.0;   // ~ equivalente a un through-pass fuerte en Z3
+                    // O3 (2026-07-05): 6→12. Con O1/O2 el receptor del cutback
+                    // ya EXISTE (P7 en el borde, P11 en el penal); +6 no
+                    // competía con el término de hueco Voronoi (hasta +40).
+                    result += 12.0;
                 }
                 else if ( forward_gain > 0.0 )
                 {
@@ -323,13 +326,27 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
     // the opponent gaining possession. Zone-scaled: losing the ball at x=40
     // is far less dangerous than at x=-30, and a flat penalty made risky
     // vertical passes always lose against safe lateral recycling.
+    //
+    // O6 (2026-07-05): el escalado x*4 era simbólico (perder en x=45 seguía
+    // costando −320 contra un cutback de +12 y un hueco de +40) — razón
+    // matemática de que el portador SIEMPRE reciclara a banda aunque el
+    // receptor central existiera (track O1-O5: ocupación y carreras ✓ pero
+    // conversión plana). Alivio adicional SOLO en zona de definición (x>25):
+    // perder el balón junto a SU área es la pérdida barata (deben cruzar
+    // toda la cancha; tenemos rest-defense P6 + trigger estrecho). En campo
+    // propio sigue siendo catastrófico (−500..−420, sin cambio).
+    //   x:    0     20     30     36     40     45    ≥47
+    //   pen: −500  −420   −320   −224   −160   −80   −60(cap)
     if ( holder->side() != state.ourSide() )
     {
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::ACTION_CHAIN,
                       "(eval) XXX opponent gains possession" );
 #endif
-        return -500.0 + std::max( 0.0, state.ball().pos().x ) * 4.0;
+        const double bx = state.ball().pos().x;
+        double loss = -500.0 + std::max( 0.0, bx ) * 4.0
+                             + std::max( 0.0, bx - 25.0 ) * 12.0;
+        return std::min( loss, -60.0 );
     }
 
     const int holder_unum = holder->unum();
@@ -620,9 +637,16 @@ evaluate_state( const PredictState & state, const rcsc::WorldModel & wm )
                                                         our_dist = tmp.length();
 
 
-					if (max_dist < min_dist - our_dist ) 
+					// O3 (2026-07-05): mismo sesgo de centralidad que el 1er
+					// lazo (L515-517) — este 2º lazo (puntos sobre la línea de
+					// offside) seguía premiando el hueco de la esquina.
+					double vscore2 = min_dist - our_dist;
+					if ( (*p).x > 30.0 )
+						vscore2 -= std::max( 0.0, (*p).absY() - 8.0 ) * 0.5;
+
+					if (max_dist < vscore2 )
 					{
-						max_dist = min_dist - our_dist;
+						max_dist = vscore2;
 						best_point = (*p);
 					}
 			    }
