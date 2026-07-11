@@ -16,6 +16,7 @@
 #include "bhv_mark_execute.h"
 #include "bhv_basic_block.h"
 #include "cyrus_interceptable.h"
+#include "basic_actions/body_intercept_plan.h"
 
 #include "basic_actions/body_go_to_point.h"
 #include "basic_actions/body_turn_to_point.h"
@@ -66,6 +67,16 @@ bool Bhv_DefensiveMove::execute( rcsc::PlayerAgent * agent )
     // no, bloqueador designado → tapa el carril; si no → return false". Correrlo
     // primero hace que EXACTAMENTE UN defensa presione el balón y el resto caiga
     // al marcaje. Es autolimitante (no genera racimo).
+    // Pieza rescatada del port completo (2026-07-06, cambio único de tanda):
+    // Body_InterceptPlan de Cyrus — la decisión de DISPUTA del balón con
+    // CyrusPlayerIntercept + tackle-intercept. SOLO en la ruta defensiva; la
+    // ofensiva no se toca (la succión de atacantes fue lo que mató el GF en
+    // el trasplante completo). Si no dispara, sigue nuestro flujo normal.
+    if ( Body_InterceptPlan().execute( agent ) ) {
+        agent->debugClient().addMessage( "DefInterceptPlan" );
+        return true;
+    }
+
     if ( Bhv_BasicBlock().execute( agent ) ) {
         agent->debugClient().addMessage( "DefPress" );
         return true;

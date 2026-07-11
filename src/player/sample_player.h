@@ -34,6 +34,8 @@
 #include <rcsc/player/player_agent.h>
 #include <vector>
 
+class LocalizationDenoiser;
+
 class SamplePlayer
     : public rcsc::PlayerAgent {
 private:
@@ -42,6 +44,12 @@ private:
 
     FieldEvaluator::ConstPtr M_field_evaluator;
     ActionGenerator::ConstPtr M_action_generator;
+
+    //! Denoiser de localización (port Cyrus 2026-07-11): corrige las
+    //! posiciones estimadas de rivales/compañeros en el WM cada ciclo.
+    LocalizationDenoiser * M_localization_denoiser;
+
+    void update_player_by_denoiser();
 
 public:
 

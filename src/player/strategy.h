@@ -78,9 +78,19 @@ enum SituationType {
     PenaltyKick_Situation,
 };
 
+// Compat mínima con la API de Cyrus (para piezas portadas selectivamente,
+// hoy: body_intercept_plan). Mapea por roleNumber: 1 GK, 2-5 back, 6-8 half.
+enum class PostLine {
+    golie,
+    back,
+    half,
+    forward
+};
 
 class Strategy {
 public:
+    PostLine tmLine( size_t unum ) const;
+
     static const std::string BEFORE_KICK_OFF_CONF;
     static const std::string BEFORE_KICK_OFF_OUR_CONF;
     static const std::string NORMAL_FORMATION_CONF;

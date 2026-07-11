@@ -59,6 +59,7 @@
 #include "neck_offensive_intercept_neck.h"
 #include <rcsc/player/soccer_intention.h>
 #include "bhv_unmark.h"
+#include "bhv_scape_voronoi.h"
 
 using namespace rcsc;
 
@@ -424,6 +425,23 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
             if ( wm.kickableTeammate() ) {
                 agent->addSayMessage( new PassRequestMessage( target_point ) );
             }
+        }
+    }
+
+    // F2.1 (2026-07-06, cambio único de tanda): bhv_scape_voronoi de Cyrus —
+    // carreras profundas SOSTENIDAS (IntentionScape persiste entre ciclos, no
+    // re-decide cada 100ms) hacia huecos Voronoi cerca del área. Cubre la
+    // penetración en elaboración que ni el 3-ring (radio 2-8m) ni las llegadas
+    // al 2º palo (ball.x>25) dan. Sus gates internos (can_scape) limitan
+    // zona/roles; aquí solo iniciativa + stamina.
+    if ( ! forward_run_active
+         && our_team_has_initiative
+         && wm.self().stamina() > ServerParam::i().staminaMax() * 0.40 )
+    {
+        if ( bhv_scape_voronoi().execute( agent ) )
+        {
+            agent->debugClient().addMessage( "ScapeVoro" );
+            return true;
         }
     }
 

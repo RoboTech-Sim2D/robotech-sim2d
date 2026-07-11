@@ -107,12 +107,17 @@ add_executable(sample_player
   data_extractor/DEState.cpp
   data_extractor/offensive_data_extractor.cpp
   bhv_unmark.cpp
+  bhv_scape_voronoi.cpp
+  localization_denoiser.cpp
+  localization_denoiser_by_action.cpp
+  localization_denoiser_by_area.cpp
   bhv_basic_block.cpp
   cyrus_interceptable.cpp
   bhv_mark_opponent.cpp
   bhv_defensive_move.cpp
   bhv_mark_execute.cpp
   bhv_mark_decision_greedy.cpp
+  basic_actions/body_intercept_plan.cpp
   best_match_finder.cpp
   mark_position_finder.cpp
   )

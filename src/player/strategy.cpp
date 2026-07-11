@@ -1997,3 +1997,15 @@ Strategy::applyDynamicFormationShifts( const WorldModel & wm,
                       ball_pos.x );
     }
 }
+
+/*-------------------------------------------------------------------*/
+// Compat mínima con la API de Cyrus (piezas selectivas, 2026-07-06).
+PostLine
+Strategy::tmLine( size_t unum ) const
+{
+    const int r = roleNumber( static_cast< int >( unum ) );
+    if ( r == 1 ) return PostLine::golie;
+    if ( r >= 2 && r <= 5 ) return PostLine::back;
+    if ( r >= 6 && r <= 8 ) return PostLine::half;
+    return PostLine::forward;
+}

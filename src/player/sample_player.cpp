@@ -32,6 +32,7 @@
 
 #include "strategy.h"
 #include "field_analyzer.h"
+#include "localization_denoiser_by_area.h"
 
 #include "action_chain_holder.h"
 #include "sample_field_evaluator.h"
@@ -98,6 +99,8 @@ SamplePlayer::SamplePlayer()
     : PlayerAgent(),
       M_communication()
 {
+    // Denoiser de localización (port Cyrus 2026-07-11): variante by_area.
+    M_localization_denoiser = new LocalizationDenoiserByArea();
     M_field_evaluator = createFieldEvaluator();
     M_action_generator = createActionGenerator();
 
@@ -222,10 +225,13 @@ SamplePlayer::initImpl( CmdLineParser & cmd_parser )
 void
 SamplePlayer::actionImpl()
 {
-    // PROFILING TEMPORAL O5 (2026-07-05): vigilar que MAX_EVALUATE_LIMIT
-    // 250→320 no reintroduzca los picos >70ms que causaban lost-kick (jun-21).
-    // Solo registra eventos lentos en ./slow_actions.csv (CWD del lanzamiento
-    // = build/bin en las tandas). QUITAR tras validar la tanda O5.
+    // VIGÍA DE RENDIMIENTO (permanente, costo ~0): registra en
+    // ./slow_actions.csv (CWD del lanzamiento) cada decisión que tarde >70ms
+    // (dorsal,ciclo,ms). Un ciclo >70ms suele costar la acción ("lost kick" =
+    // jugadores que se quedan pensando). Ya cazó 2 regresiones reales:
+    // eval-limit 320 (jul-05) y scape_voronoi sin escalonar (jul-11).
+    // Leerlo tras cada tanda: eventos en ciclos <20 o fronteras (3000/6000)
+    // son arranque/descanso e ignorables.
     struct ProfileGuard {
         std::chrono::steady_clock::time_point t0;
         const rcsc::WorldModel & wm;
@@ -243,6 +249,13 @@ SamplePlayer::actionImpl()
     } profile_guard_( world() );
 
     SamplePlayer::player_port = this->config().port();
+
+    // Denoiser (port Cyrus 2026-07-11): corregir posiciones en el WM ANTES de
+    // cualquier decisión. En Cyrus esto corre vía hook virtual de su fork;
+    // aquí el inicio de actionImpl es el mismo punto efectivo (WM ya
+    // actualizado, ninguna decisión tomada aún).
+    update_player_by_denoiser();
+
     if ( this->audioSensor().trainerMessageTime() == world().time() )
     {
         std::cerr << world().ourTeamName() << ' ' << world().self().unum()
@@ -871,4 +884,13 @@ SamplePlayer::createActionGenerator() const
                        2, ActGen_RangeActionChainLengthFilter::MAX ) );
 
     return ActionGenerator::ConstPtr( g );
+}
+
+/*-------------------------------------------------------------------*/
+// Denoiser de localización (port Cyrus 2026-07-11).
+void
+SamplePlayer::update_player_by_denoiser()
+{
+    M_localization_denoiser->update( this );
+    M_localization_denoiser->debug( this );
 }
