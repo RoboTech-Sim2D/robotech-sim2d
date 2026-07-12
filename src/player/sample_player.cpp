@@ -261,6 +261,53 @@ SamplePlayer::actionImpl()
     // actualizado, ninguna decisión tomada aún).
     update_player_by_denoiser();
 
+    // AUDITORÍA DE RUIDO RESIDUAL (temporal; track-de-ruido paso 1, 2026-07-12).
+    // Solo se activa corriendo con `--fullstate reference` (debug_fullstate):
+    // el agente mantiene el WM ruidoso QUE DECIDE y el fullstate de verdad.
+    // Cada 10 ciclos, cada jugador escribe UNA fila con el error |WM−verdad|
+    // por objeto — DESPUÉS del denoiser, para medir lo que él NO corrige:
+    // ciclo,unum,ball_perr,ball_verr,self_err,opp<10m,opp10-25,opp>25,mate_err
+    // Archivo: ./noise_audit.csv (CWD del lanzamiento). Costo cero sin el flag.
+    if ( config().debugFullstate()
+         && fullstateWorld().time() == world().time()
+         && world().gameMode().type() == rcsc::GameMode::PlayOn
+         && world().time().cycle() % 10 == 0 )
+    {
+        const rcsc::WorldModel & nw = world();
+        const rcsc::WorldModel & fs = fullstateWorld();
+        double opp_err[3] = { 0, 0, 0 };
+        int    opp_cnt[3] = { 0, 0, 0 };
+        double mate_err = 0.0; int mate_cnt = 0;
+        for ( int u = 1; u <= 11; ++u )
+        {
+            const rcsc::AbstractPlayerObject * fp = fs.theirPlayer( u );
+            const rcsc::AbstractPlayerObject * np = nw.theirPlayer( u );
+            if ( fp && np && np->unum() > 0 )
+            {
+                const double d_true = fs.self().pos().dist( fp->pos() );
+                const int band = ( d_true < 10.0 ? 0 : d_true < 25.0 ? 1 : 2 );
+                opp_err[band] += np->pos().dist( fp->pos() );
+                opp_cnt[band] += 1;
+            }
+            const rcsc::AbstractPlayerObject * fm = fs.ourPlayer( u );
+            const rcsc::AbstractPlayerObject * nm = nw.ourPlayer( u );
+            if ( fm && nm && nm->unum() > 0 && u != nw.self().unum() )
+            {
+                mate_err += nm->pos().dist( fm->pos() );
+                mate_cnt += 1;
+            }
+        }
+        std::ofstream f( "noise_audit.csv", std::ios::app );
+        f << nw.time().cycle() << ',' << nw.self().unum()
+          << ',' << nw.ball().pos().dist( fs.ball().pos() )
+          << ',' << ( nw.ball().vel() - fs.ball().vel() ).r()
+          << ',' << nw.self().pos().dist( fs.self().pos() )
+          << ',' << ( opp_cnt[0] ? opp_err[0] / opp_cnt[0] : -1.0 )
+          << ',' << ( opp_cnt[1] ? opp_err[1] / opp_cnt[1] : -1.0 )
+          << ',' << ( opp_cnt[2] ? opp_err[2] / opp_cnt[2] : -1.0 )
+          << ',' << ( mate_cnt   ? mate_err   / mate_cnt   : -1.0 ) << '\n';
+    }
+
     if ( this->audioSensor().trainerMessageTime() == world().time() )
     {
         std::cerr << world().ourTeamName() << ' ' << world().self().unum()
