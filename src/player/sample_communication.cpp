@@ -227,6 +227,13 @@ SampleCommunication::execute( PlayerAgent * agent )
 
 #if 1
     sayBallAndPlayers( agent );
+    // AUDITORÍA DEL SAY (2026-07-12, medida sobre 17,333 says de un partido):
+    // el 44% del canal era charla de cansancio (Stamina 22% como RELLENO del
+    // espacio sobrante + Wait 19% + Recovery 3%) y saySelf estaba en la rama
+    // MUERTA (#else, 0 envíos) — pese a que cada jugador conoce su posición a
+    // 0.04m mientras sus compañeros lo conocen a 2.48m (noise_audit). Self
+    // entra ANTES que el relleno (además SelfMessage ya incluye stamina).
+    saySelf( agent );
     sayStamina( agent );
     // Difundir líneas: reduce desincronización del offside trap y de la
     // línea defensiva entre world models (las funciones ya existían sin llamarse;
@@ -2097,6 +2104,15 @@ SampleCommunication::saySelf( PlayerAgent * agent )
 bool
 SampleCommunication::sayStamina( PlayerAgent * agent )
 {
+    // AUDITORÍA DEL SAY (2026-07-12): era relleno incondicional (22% del
+    // canal). La stamina solo es INFORMACIÓN cuando es baja; con tanque
+    // lleno el espacio vale más para Self/líneas.
+    if ( agent->world().self().stamina()
+         > rcsc::ServerParam::i().staminaMax() * 0.5 )
+    {
+        return false;
+    }
+
     const int current_len = agent->effector().getSayMessageLength();
     if ( current_len == 0 )
     {
