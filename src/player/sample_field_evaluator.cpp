@@ -258,6 +258,12 @@ SampleFieldEvaluator::operator()(const PredictState &state,
                     // O3 (2026-07-05): 6→12. Con O1/O2 el receptor del cutback
                     // ya EXISTE (P7 en el borde, P11 en el penal); +6 no
                     // competía con el término de hueco Voronoi (hasta +40).
+                    // P2a PROBADO Y REVERTIDO (2026-07-12): 12→18 no movió
+                    // los toques centrales (5%) y la tanda salió con GF 0.25.
+                    // LECCIÓN: perillas finas del evaluador son indetectables
+                    // con tandas secuenciales de N=20 (GF varía 0.25-0.71
+                    // entre tandas iguales) — si se retoman, usar el harness
+                    // A/B pareado (run_ab_vs_opponent.sh).
                     result += 12.0;
                 }
                 else if ( forward_gain > 0.0 )

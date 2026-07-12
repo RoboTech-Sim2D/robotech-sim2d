@@ -33,6 +33,7 @@
 #include "strategy.h"
 #include "field_analyzer.h"
 #include "localization_denoiser_by_area.h"
+#include "localization_denoiser_by_action.h"
 
 #include "action_chain_holder.h"
 #include "sample_field_evaluator.h"
@@ -99,7 +100,11 @@ SamplePlayer::SamplePlayer()
     : PlayerAgent(),
       M_communication()
 {
-    // Denoiser de localización (port Cyrus 2026-07-11): variante by_area.
+    // Denoiser de localización (port Cyrus 2026-07-11): variante ByArea.
+    // ByAction se PROBÓ Y FALLÓ su gate (tanda 2026-07-12: GF combinado
+    // 0.29 vs 0.71 de ByArea; RoboCIn 1.0→0.43 GF y GA 2.7→3.3) — el modelo
+    // "rival racional" estima peor que la factibilidad física pura a este
+    // nivel de rivales. NO reintentar sin evidencia nueva.
     M_localization_denoiser = new LocalizationDenoiserByArea();
     M_field_evaluator = createFieldEvaluator();
     M_action_generator = createActionGenerator();

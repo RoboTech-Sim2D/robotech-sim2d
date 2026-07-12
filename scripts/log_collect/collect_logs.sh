@@ -175,14 +175,17 @@ for row in "${OPPONENTS[@]}"; do
     # CWD=build/bin para cargar pesos+formaciones. El parseo del marcador de
     # abajo ya es side-aware (usa "'L' vs 'R'" del .out), no necesita cambios.
     if [ $((i % 2)) -eq 1 ]; then
+      side="IZQ"; left_name="$OURNAME"; right_name="$name"
       ( cd "$OURBIN" && ./start.sh -h localhost -p 6000 -t "$OURNAME" >/dev/null 2>&1 )
       sleep 1
       launch_opponent "$rt" "$dir" "$launch" "$style"
     else
+      side="DER"; left_name="$name"; right_name="$OURNAME"
       launch_opponent "$rt" "$dir" "$launch" "$style"
       sleep 1
       ( cd "$OURBIN" && ./start.sh -h localhost -p 6000 -t "$OURNAME" >/dev/null 2>&1 )
     fi
+    echo "  Jugando... ($left_name vs $right_name)" 
 
     # esperar a que el server termine solo (auto_mode); tope generoso
     for s in $(seq 1 900); do kill -0 $local_srv 2>/dev/null || break; sleep 1; done
@@ -198,8 +201,11 @@ for row in "${OPPONENTS[@]}"; do
     if [ "$left" = "$OURNAME" ]; then og=$L; pg=$R; else og=$R; pg=$L; fi
     [ -z "${og:-}" ] && og="?"; [ -z "${pg:-}" ] && pg="?"
     rcg_ok=$([ -f "$OUT/${tag}.rcg" ] && echo "rcg✓" || echo "rcg✗")
-    echo "  [$name $i/$N] us=$og opp=$pg  $rcg_ok  ($tag)"
-    echo "$tag,$i,$og,$pg" >> "$CSV"
+    # el ORDEN de los nombres = lados reales (left vs right), como pidio el usuario
+    if [ "$side" = "IZQ" ]; then lg=$og; rg=$pg; else lg=$pg; rg=$og; fi
+    # side al FINAL del CSV: las columnas 1-4 no cambian (analisis existentes intactos)
+    echo "  [$name $i/$N] ${left_name}=${lg} ${right_name}=${rg}  $rcg_ok  ($tag)"
+    echo "$tag,$i,$og,$pg,$side" >> "$CSV"
   done
   echo ""
 done
