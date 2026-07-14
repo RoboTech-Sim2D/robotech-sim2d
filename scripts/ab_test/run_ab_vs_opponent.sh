@@ -60,6 +60,13 @@ rm -rf "$WORK"; mkdir -p "$WORK/run_on" "$WORK/run_off" "$WORK/logs"
 cp "$REPO/src/unmark_dnn_weights.txt" "$WORK/run_on/"
 cp "$REPO/src/unmark_dnn_weights.txt" "$WORK/run_off/"
 cp "$REPO/src/field_eval_weights.txt" "$WORK/run_on/"
+# 2026-07-13 FIX: el portero Cyrus también carga su red del CWD
+# (./helios_golie_origin, ver bhv_goalie_basic_move.cpp). Sin esto AMBAS
+# condiciones juegan con portero degradado (GA ~2.5 vs banda normal 0.6-1.6)
+# y el A/B mide sobre un equipo que no es el real. OJO: esto pone asterisco
+# al veredicto histórico de −9 netGD vs YuShan (corrió sin este fix).
+cp "$BIN/helios_golie_origin" "$WORK/run_on/"
+cp "$BIN/helios_golie_origin" "$WORK/run_off/"
 
 echo "REPO=$REPO"
 echo "SERVER=$SRV ($($SRV --version 2>/dev/null | head -1))"
@@ -89,11 +96,16 @@ run_condition() {   # $1 = ON|OFF ; $2 = our run dir ; $3 = our team name
         > "$WORK/logs/${name}.out" 2>&1 &
     local srvpid=$!
     sleep 2
+    # 2026-07-13 FIX: lanzar al rival DESDE SU CARPETA — su start.sh usa rutas
+    # relativas; sin el cd los jugadores conectan y mueren (partidos vs equipo
+    # vacío). Mismo patrón que fullstate_bench.sh. Solo se vio ahora porque el
+    # único uso previo del harness fue vs YuShan en Docker.
+    local opp_dir; opp_dir="$(dirname "${OPP_CMD%% *}")"
     if [ $((i % 2)) -eq 1 ]; then           # odd: our team left
       ( cd "$rundir" && "$BIN/start.sh" -h localhost -p 6000 -t "$myname" >/dev/null 2>&1 ); sleep 1
-      ( eval "$OPP_CMD -h localhost -p 6000" >/dev/null 2>&1 )
+      ( cd "$opp_dir" && eval "$OPP_CMD -h localhost -p 6000" >/dev/null 2>&1 )
     else                                    # even: our team right
-      ( eval "$OPP_CMD -h localhost -p 6000" >/dev/null 2>&1 ); sleep 1
+      ( cd "$opp_dir" && eval "$OPP_CMD -h localhost -p 6000" >/dev/null 2>&1 ); sleep 1
       ( cd "$rundir" && "$BIN/start.sh" -h localhost -p 6000 -t "$myname" >/dev/null 2>&1 )
     fi
     # espera a que el server termine solo (auto_mode). Cap generoso: rompe en

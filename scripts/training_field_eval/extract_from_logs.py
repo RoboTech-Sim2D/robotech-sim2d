@@ -32,7 +32,9 @@ import math
 from collections import defaultdict
 
 # How many cycles ahead to look for a goal (defines "good position")
-SCORE_HORIZON = 300  # ~30 seconds of game time
+# 2026-07-13: 300 → 150. Con 300 el crédito se asignaba a jugadas de hace
+# 30 segundos (ruido puro); 150 ≈ una posesión larga.
+SCORE_HORIZON = 150
 
 # Minimum cycle interval between samples (avoid redundant data)
 SAMPLE_INTERVAL = 10
@@ -201,9 +203,14 @@ def process_log_file(filepath):
         print(f"  No frames found, skipping")
         return []
 
-    goals = find_goal_cycles(filepath)
-    our_goal_cycles = set(c for c, s in goals if s == our_side)
-    print(f"  Found {len(goals)} goals total, {len(our_goal_cycles)} by RoboTech")
+    # 2026-07-13 ETIQUETA SIMÉTRICA: la red vieja solo veía "¿anotamos?" y
+    # aprendió a empujar jugadas que también regalaban contragolpes (−9 netGD
+    # medido). Ahora el PRÓXIMO gol dentro del horizonte decide la etiqueta:
+    #   nuestro → 1.0 | rival → 0.0 | ninguno → 0.5 (neutral)
+    # El C++ ya interpreta 0.5 como neutro ((score-0.5)*60), cero cambios allí.
+    goals = sorted(find_goal_cycles(filepath))
+    print(f"  Found {len(goals)} goals total "
+          f"({sum(1 for _, s in goals if s == our_side)} by RoboTech)")
 
     samples = []
     last_sample_cycle = -SAMPLE_INTERVAL
@@ -220,12 +227,15 @@ def process_log_file(filepath):
         if closest_dist > 2.0:  # ~kickable area
             continue
 
-        # Check if we score within horizon
-        label = 0
-        for gc in our_goal_cycles:
-            if 0 < gc - cycle <= SCORE_HORIZON:
-                label = 1
+        # Próximo gol dentro del horizonte (el primero manda)
+        label = 0.5
+        for gc, gside in goals:
+            if gc <= cycle:
+                continue
+            if gc - cycle > SCORE_HORIZON:
                 break
+            label = 1.0 if gside == our_side else 0.0
+            break
 
         features = extract_features(frame, our_side)
         samples.append(features + [label])
@@ -307,8 +317,12 @@ def main():
         writer.writerow(header)
         writer.writerows(all_samples)
 
-    positive = sum(1 for s in all_samples if s[-1] == 1)
-    print(f"\nTotal: {len(all_samples)} samples, {positive} positive ({100*positive/len(all_samples):.1f}%)")
+    pos = sum(1 for s in all_samples if s[-1] == 1.0)
+    neg = sum(1 for s in all_samples if s[-1] == 0.0)
+    neu = len(all_samples) - pos - neg
+    print(f"\nTotal: {len(all_samples)} samples | anotamos={pos} "
+          f"({100*pos/len(all_samples):.1f}%) encajamos={neg} "
+          f"({100*neg/len(all_samples):.1f}%) neutral={neu}")
     print(f"Output: {output_file}")
 
 

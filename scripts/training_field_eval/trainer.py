@@ -97,21 +97,22 @@ def main():
     print(f"Training: {len(train_X)} samples ({sum(train_Y):.0f} positive)")
     print(f"Testing:  {len(test_X)} samples ({sum(test_Y):.0f} positive)")
 
-    # Handle class imbalance
-    pos_count = sum(train_Y)
-    neg_count = len(train_Y) - pos_count
-    if pos_count > 0 and neg_count > 0:
-        class_weight = {0: 1.0, 1: neg_count / pos_count}
-        print(f"Class weight: {class_weight}")
-    else:
-        class_weight = None
+    # 2026-07-13 etiqueta simétrica {0, 0.5, 1}: class_weight ya no aplica
+    # (targets suaves). La gran mayoría es 0.5 ("no pasó nada") — sin peso,
+    # la red colapsa a 0.5 constante. Peso por muestra: eventos de gol pesan
+    # según su rareza (cap 10x para no sobreajustar a ~2% de los datos).
+    n_event = int(np.sum(train_Y != 0.5))
+    n_neutral = len(train_Y) - n_event
+    w_event = min(10.0, n_neutral / max(1, n_event))
+    sample_weight = np.where(train_Y != 0.5, w_event, 1.0)
+    print(f"Eventos: {n_event} ({100*n_event/len(train_Y):.1f}%), peso {w_event:.1f}x")
 
     # Build model
     model = build_model(train_X.shape[1])
     model.compile(
         optimizer=optimizers.Adam(learning_rate=0.0005),
-        loss=losses.binary_crossentropy,
-        metrics=['accuracy']
+        loss=losses.binary_crossentropy,  # válida con targets suaves [0,1]
+        metrics=['mae']  # accuracy no significa nada con targets {0,0.5,1}
     )
     model.summary()
 
@@ -120,8 +121,8 @@ def main():
         callbacks.ModelCheckpoint(
             filepath=os.path.join(output_dir, 'best_field_eval.h5'),
             save_best_only=True,
-            monitor='val_accuracy',
-            mode='max'
+            monitor='val_loss',
+            mode='min'
         ),
         callbacks.EarlyStopping(
             monitor='val_loss',
@@ -141,7 +142,7 @@ def main():
         train_X, train_Y,
         epochs=100,
         batch_size=64,
-        class_weight=class_weight,
+        sample_weight=sample_weight,
         validation_data=(test_X, test_Y),
         callbacks=my_callbacks
     )
@@ -149,17 +150,26 @@ def main():
     # Save final model
     model.save(os.path.join(output_dir, 'field_eval_model.h5'))
 
-    # Evaluate
-    test_loss, test_acc = model.evaluate(test_X, test_Y)
-    print(f"\nFinal test accuracy: {test_acc:.4f}")
-    print(f"Final test loss: {test_loss:.4f}")
+    # Evaluate — la métrica que importa: ¿ORDENA bien? Sobre los eventos de
+    # test, la predicción media en estados pre-gol-nuestro debe superar a la
+    # de estados pre-gol-rival (separación = señal utilizable por el argmax).
+    test_loss, test_mae = model.evaluate(test_X, test_Y)
+    pred = model.predict(test_X, verbose=0).flatten()
+    m_pos = float(pred[test_Y == 1.0].mean()) if (test_Y == 1.0).any() else float('nan')
+    m_neg = float(pred[test_Y == 0.0].mean()) if (test_Y == 0.0).any() else float('nan')
+    m_neu = float(pred[test_Y == 0.5].mean()) if (test_Y == 0.5).any() else float('nan')
+    print(f"\nTest loss: {test_loss:.4f}  MAE: {test_mae:.4f}")
+    print(f"Predicción media | pre-gol-nuestro: {m_pos:.3f}  neutral: {m_neu:.3f}  pre-gol-rival: {m_neg:.3f}")
+    print(f"Separación (pos-neg): {m_pos - m_neg:.3f}  (>0.15 = señal decente)")
 
     # Save results
     with open(os.path.join(output_dir, 'results.txt'), 'w') as f:
-        f.write(f"Test accuracy: {test_acc:.4f}\n")
-        f.write(f"Test loss: {test_loss:.4f}\n")
-        f.write(f"Train samples: {len(train_X)}\n")
-        f.write(f"Test samples: {len(test_X)}\n")
+        f.write(f"Test loss: {test_loss:.4f}\nTest MAE: {test_mae:.4f}\n")
+        f.write(f"Mean pred pre-goal-ours: {m_pos:.4f}\n")
+        f.write(f"Mean pred neutral: {m_neu:.4f}\n")
+        f.write(f"Mean pred pre-goal-theirs: {m_neg:.4f}\n")
+        f.write(f"Separation: {m_pos - m_neg:.4f}\n")
+        f.write(f"Train samples: {len(train_X)}\nTest samples: {len(test_X)}\n")
 
     print(f"\nModel saved to {output_dir}")
     print(f"\nNext steps:")

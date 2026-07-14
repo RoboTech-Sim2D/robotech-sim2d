@@ -308,6 +308,46 @@ SamplePlayer::actionImpl()
           << ',' << ( mate_cnt   ? mate_err   / mate_cnt   : -1.0 ) << '\n';
     }
 
+    // AUDITORÍA NECK (temporal; track-de-ruido paso 5, 2026-07-12). Mide lo
+    // que el cuello debería mantener fresco: cuando YO soy (o estoy a ≤1
+    // ciclo de ser) el portador, ¿qué tan rancios están los rivales que
+    // importan para decidir el pase/regate? Zona definida sobre la VERDAD
+    // (fullstate) — rivales a <30m del balón real y no muy por detrás — para
+    // que los fantasmas no-vistos cuenten en vez de esconderse.
+    // ./neck_audit.csv: ciclo,unum,n_zona,err_medio,poscount_medio,frac_frescos(pc<=2)
+    if ( config().debugFullstate()
+         && fullstateWorld().time() == world().time()
+         && world().gameMode().type() == rcsc::GameMode::PlayOn
+         && ( world().self().isKickable()
+              || world().interceptTable().selfStep() <= 1 ) )
+    {
+        const rcsc::WorldModel & nw = world();
+        const rcsc::WorldModel & fs = fullstateWorld();
+        double err_sum = 0.0; double pc_sum = 0.0;
+        int n_zone = 0; int n_fresh = 0;
+        for ( int u = 1; u <= 11; ++u )
+        {
+            const rcsc::AbstractPlayerObject * fp = fs.theirPlayer( u );
+            const rcsc::AbstractPlayerObject * np = nw.theirPlayer( u );
+            if ( ! fp || ! np || np->unum() <= 0 ) continue;
+            if ( fp->pos().dist( fs.ball().pos() ) > 30.0 ) continue;
+            if ( fp->pos().x < fs.ball().pos().x - 10.0 ) continue;
+            err_sum += np->pos().dist( fp->pos() );
+            pc_sum  += np->posCount();
+            if ( np->posCount() <= 2 ) ++n_fresh;
+            ++n_zone;
+        }
+        if ( n_zone > 0 )
+        {
+            std::ofstream f( "neck_audit.csv", std::ios::app );
+            f << nw.time().cycle() << ',' << nw.self().unum()
+              << ',' << n_zone
+              << ',' << err_sum / n_zone
+              << ',' << pc_sum / n_zone
+              << ',' << static_cast<double>( n_fresh ) / n_zone << '\n';
+        }
+    }
+
     if ( this->audioSensor().trainerMessageTime() == world().time() )
     {
         std::cerr << world().ourTeamName() << ' ' << world().self().unum()
