@@ -32,6 +32,7 @@
 
 #include "strategy.h"
 #include "field_analyzer.h"
+#include "rival_tuning.h"
 #include "localization_denoiser_by_area.h"
 #include "localization_denoiser_by_action.h"
 
@@ -361,6 +362,7 @@ SamplePlayer::actionImpl()
     //
     // update strategy and analyzer
     //
+    RivalTuning::i().update( world() );  // perillas por rival (lazy, 1 vez)
     Strategy::instance().update( world() );
     FieldAnalyzer::instance().update( world() );
 

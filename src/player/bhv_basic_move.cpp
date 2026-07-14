@@ -39,6 +39,7 @@
 #include "bhv_basic_tackle.h"
 #include "neck_offensive_intercept_neck.h"
 #include "bhv_basic_block.h"
+#include "rival_tuning.h"
 
 #include "basic_actions/basic_actions.h"
 #include "basic_actions/body_go_to_point.h"
@@ -174,7 +175,9 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
 
 
     // G2d: pressin
-    int pressing = 25; //aggressive pressing (was 13)
+    // 2026-07-13: base ajustable por rival (default 25 = valor vigente;
+    // "was 13" histórico). Ver rival_tuning.h / ./rival_tuning.conf.
+    int pressing = RivalTuning::i().pressBase();
 
     if ( role >= 6 && role <= 8 && wm.ball().pos().x > -30.0 && wm.self().pos().x < 10.0 )
         pressing = 7;
@@ -199,7 +202,7 @@ Bhv_BasicMove::execute( PlayerAgent * agent )
 
     // Defensores en campo propio: presionar sin requerir ser el más cercano
     bool defender_deep_press = ( ( role == 2 || role == 3 || role == 4 || role == 5 )
-                                  && wm.ball().pos().x < -20.0
+                                  && wm.ball().pos().x < RivalTuning::i().deepPressX()
                                   && self_min < opp_min + pressing
                                   && self_min < 20 );
 

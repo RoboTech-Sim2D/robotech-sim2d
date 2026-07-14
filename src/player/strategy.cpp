@@ -41,6 +41,7 @@
 
 #include "strategy.h"
 
+#include "rival_tuning.h"
 #include "soccer_role.h"
 
 
@@ -1112,8 +1113,9 @@ Strategy::updatePosition( const WorldModel & wm )
     // |y|>7 → 6 jugadores subían en cualquier posesión y por ahí llegaban los
     // contragolpes (46 goles de transición en competencia). Ahora solo con
     // balón claramente ofensivo (x>15) y de verdad en banda (|y|>12).
-    double wing_x = 15.0;
-    double wing_y = 12.0;
+    // 2026-07-13: trigger ajustable por rival (defaults 15/12 = vigentes)
+    double wing_x = RivalTuning::i().wingX();
+    double wing_y = RivalTuning::i().wingY();
     double wing_depth = 5.0;
     double wing_limit = 39.0;
 

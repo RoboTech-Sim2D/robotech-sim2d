@@ -57,6 +57,7 @@ add_custom_target(sync_runtime_data ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${PROJECT_SOURCE_DIR}/src/unmark_dnn_weights.txt
           ${PROJECT_SOURCE_DIR}/src/helios_golie_origin
+          ${PROJECT_SOURCE_DIR}/src/rival_tuning.conf
           ${PROJECT_BINARY_DIR}/bin/
-  COMMENT "Sincronizando formations-dt y pesos DNN a bin/"
+  COMMENT "Sincronizando formations-dt, pesos DNN y rival_tuning.conf a bin/"
   )

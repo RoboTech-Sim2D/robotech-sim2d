@@ -111,6 +111,7 @@ add_executable(sample_player
   localization_denoiser.cpp
   localization_denoiser_by_action.cpp
   localization_denoiser_by_area.cpp
+  rival_tuning.cpp
   bhv_basic_block.cpp
   cyrus_interceptable.cpp
   bhv_mark_opponent.cpp

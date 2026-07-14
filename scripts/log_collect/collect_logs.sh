@@ -18,12 +18,18 @@
 #     collect_logs.sh                      # 10 partidos vs cada rival
 #     collect_logs.sh 20                   # 20 vs cada rival
 #     collect_logs.sh 15 YuShan2025 RoboCIn   # 15 vs esos dos
-#     collect_logs.sh 5 FRA-UNIted SRBIAU2D   # solo los nativos (sin sudo)
+#     collect_logs.sh 5 FRA-UNIted            # OJO: FRA es DOCKER (pide sudo)
+#                                             #      y REAL-TIME (~10 min/partido)
+#     (único rival nativo sin sudo: SRBIAU2D)
 #
 #   Variables de entorno opcionales:
 #     OUTROOT   dónde guardar (default ~/rc/logs/dnn_data)
 #     HALF      medio tiempo en seg-sim   (default 300 = partido completo 6000c)
 #     SYNCH     true=rápido / false=tiempo real (default true)
+#     MONITOR   1 = abre rcssmonitor con auto-reconexión: la vista se refresca
+#               sola en cada partido nuevo (sin Ctrl+C entre partidos). Si ya
+#               tienes uno abierto, mejor lánzalo tú con:
+#                 rcssmonitor --auto-reconnect-mode on --auto-reconnect-wait 2
 #     DOCKER    comando docker            (default "sudo docker")
 #     IMAGE     imagen para rivales docker(default ubuntu:22.04)
 #     RCSS_SERVER  ruta a rcssserver      (default: la del PATH)
@@ -97,7 +103,18 @@ fi
 
 local_srv=""   # PID del rcssserver del partido en curso (para poder matarlo)
 
+# MONITOR=1: un solo rcssmonitor con auto-reconexión (se refresca solo al
+# arrancar cada partido; se cierra al terminar la tanda)
+MONITOR="${MONITOR:-0}"
+mon_pid=""
+if [ "$MONITOR" = "1" ] && command -v rcssmonitor >/dev/null 2>&1; then
+  rcssmonitor --server-host localhost --auto-reconnect-mode on \
+              --auto-reconnect-wait 2 >/dev/null 2>&1 &
+  mon_pid=$!
+fi
+
 cleanup_all() {
+  [ -n "${mon_pid:-}" ] && kill "$mon_pid" 2>/dev/null
   [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null
   [ -n "${local_srv:-}" ] && kill "$local_srv" 2>/dev/null          # server actual por PID
   $DOCKER rm -f rt_opp >/dev/null 2>&1
